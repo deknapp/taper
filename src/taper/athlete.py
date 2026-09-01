@@ -103,8 +103,12 @@ class TrainingDay:
 
 @dataclass
 class Injury:
-    """Prior injury is the strongest single predictor of future injury in the
-    literature, so history here materially changes the hazard model."""
+    """A past injury as the runner remembers it, entered once at intake.
+
+    Coarse by nature -- recalled months or years later. `InjuryEpisode` is the
+    precise version, recorded as it happens; this is the backfill for everything
+    that predates the log.
+    """
 
     tissue: Tissue
     body_part: str
@@ -112,6 +116,73 @@ class Injury:
     weeks_out: float | None = None
     recurrences: int = 0
     notes: str = ""
+
+
+@dataclass
+class Symptom:
+    """One body part on one day, and how much it complained.
+
+    This is the label column. A training log without it records only the input
+    to the injury model and none of the outcome, which is the difference between
+    a diary and a dataset -- so the app asks for it daily, at ten seconds a day.
+    """
+
+    day: date
+    body_part: str
+    severity: float           # 0 = fine, 10 = cannot run
+    tissue: Tissue = Tissue.OTHER
+    affected_running: bool = False
+    notes: str = ""
+
+    @property
+    def is_flare(self) -> bool:
+        """The threshold the hazard model treats as an event worth predicting."""
+        return self.severity >= 4.0 or self.affected_running
+
+
+@dataclass
+class InjuryEpisode:
+    """A dated flare-up: onset to resolution, recorded as it happens.
+
+    Episodes are what the injury model is fitted against. An open episode
+    (`resolved_date is None`) is one the runner is still in.
+    """
+
+    body_part: str
+    tissue: Tissue
+    onset_date: date
+    resolved_date: date | None = None
+    peak_severity: float | None = None
+    days_lost: int = 0
+    notes: str = ""
+
+    def is_open(self, on: date | None = None) -> bool:
+        if self.resolved_date is None:
+            return True
+        return (on or date.today()) <= self.resolved_date
+
+    def duration_days(self, on: date | None = None) -> int:
+        end = self.resolved_date or (on or date.today())
+        return max(0, (end - self.onset_date).days)
+
+
+@dataclass
+class Wellness:
+    """Daily self-report. Cheap to give, and the recovery side of the ledger.
+
+    Sleep and stress are recovery multipliers rather than decoration: both have
+    real associations with injury and with blunted training response.
+    """
+
+    day: date
+    sleep_hours: float | None = None
+    sleep_quality: int | None = None   # 1 poor - 5 excellent
+    soreness: int | None = None        # 1 none - 5 severe, whole-body
+    stress: int | None = None          # 1 calm - 5 maximal
+    motivation: int | None = None      # 1 flat - 5 eager
+    resting_hr: int | None = None
+    body_mass_kg: float | None = None
+    notes: str = ''
 
 
 @dataclass
@@ -174,6 +245,9 @@ class AthleteProfile:
     races: list[RaceResult] = field(default_factory=list)
     injuries: list[Injury] = field(default_factory=list)
     training_days: list[TrainingDay] = field(default_factory=list)
+    symptoms: list[Symptom] = field(default_factory=list)
+    episodes: list[InjuryEpisode] = field(default_factory=list)
+    wellness: list[Wellness] = field(default_factory=list)
     goal: GoalRace | None = None
 
     def age_on(self, when: date) -> float | None:
