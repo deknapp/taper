@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>taper — runner intake</title>
+<style>
+  :root {
+    --bg: #12140f; --panel: #1a1d16; --line: #2c3126; --ink: #e8eadf;
+    --muted: #9aa38c; --accent: #a3c057; --warn: #e0a33e; --alert: #e06c4f;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif; }
+  header { padding: 22px 28px 16px; border-bottom: 1px solid var(--line); }
+  h1 { margin: 0; font-size: 21px; letter-spacing: -0.01em; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  .sub { color: var(--muted); font-size: 13.5px; margin-top: 5px; max-width: 62ch; }
+  .wrap { display: grid; grid-template-columns: minmax(0,1.55fr) minmax(0,1fr);
+    gap: 26px; padding: 22px 28px 80px; align-items: start; }
+  @media (max-width: 980px) { .wrap { grid-template-columns: 1fr; } }
+  fieldset { border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--panel); padding: 16px 18px 18px; margin: 0 0 16px; }
+  legend { padding: 0 8px; font-weight: 600; font-size: 13px; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--accent); }
+  .hint { color: var(--muted); font-size: 12.5px; margin: -2px 0 14px; max-width: 68ch; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; }
+  label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+  input, select, textarea { width: 100%; background: #0e100b; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px;
+    font: inherit; font-size: 14px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent);
+    outline-offset: -1px; border-color: transparent; }
+  textarea { min-height: 108px; resize: vertical; font-family: ui-monospace, Menlo, monospace;
+    font-size: 12.5px; }
+  button { background: var(--accent); color: #12140f; border: 0; border-radius: 6px;
+    padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  button.ghost:hover { color: var(--ink); border-color: var(--muted); }
+  button.link { background: none; border: 0; color: var(--muted); padding: 2px 6px;
+    cursor: pointer; font-size: 16px; line-height: 1; }
+  button.link:hover { color: var(--alert); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--muted); font-weight: 600; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+  td { padding: 3px 4px; border-bottom: 1px solid #23271d; }
+  td input, td select { padding: 5px 7px; font-size: 13px; }
+  .rail { position: sticky; top: 18px; }
+  .stat { font-size: 40px; font-weight: 650; letter-spacing: -0.02em; line-height: 1; }
+  .stat small { font-size: 13px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+  .badge { display: inline-block; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .06em; padding: 2px 7px; border-radius: 99px; border: 1px solid var(--line);
+    color: var(--muted); vertical-align: 3px; margin-left: 8px; }
+  .badge.measured { color: var(--accent); border-color: #3f5426; }
+  .badge.aged, .badge.estimated { color: var(--warn); border-color: #5a4520; }
+  .equiv { display: flex; justify-content: space-between; padding: 5px 0;
+    border-bottom: 1px solid #23271d; font-size: 14px; }
+  .equiv span:first-child { color: var(--muted); }
+  .equiv b { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .flag { display: flex; gap: 9px; padding: 9px 0; border-bottom: 1px solid #23271d;
+    font-size: 13px; color: #cdd3c0; }
+  .flag i { flex: none; width: 7px; height: 7px; border-radius: 99px; margin-top: 6px;
+    background: var(--muted); }
+  .flag.watch i { background: var(--warn); } .flag.warn i { background: var(--alert); }
+  .msg { font-size: 12.5px; color: var(--muted); margin-top: 8px; min-height: 1.4em; }
+  .msg.ok { color: var(--accent); }
+  .row { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+  .empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+  .toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 6px;
+    overflow: hidden; }
+  .toggle button { background: transparent; color: var(--muted); border-radius: 0;
+    padding: 5px 12px; font-size: 12.5px; font-weight: 500; }
+  .toggle button[aria-pressed="true"] { background: var(--accent); color: #12140f; font-weight: 600; }
+  svg .axis { stroke: var(--line); } svg text { fill: var(--muted); font-size: 10px; }
+  .saved { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px;
+    word-break: break-all; color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>taper <span>— runner intake</span></h1>
+  <div class="sub">Everything the simulation needs to know about you. Only the
+    training section is really required; the rest buys fidelity, and each field
+    says what it buys. Nothing leaves this machine.</div>
+</header>
+
+<div class="wrap">
+<div class="col">
+
+  <fieldset>
+    <legend>The runner</legend>
+    <div class="grid">
+      <div><label for="name">Name</label><input id="name" placeholder="Jane Doe"></div>
+      <div><label for="birth_date">Date of birth</label><input id="birth_date" type="date"></div>
+      <div><label for="sex">Sex</label><select id="sex">
+        <option value="unspecified">Prefer not to say</option>
+        <option value="female">Female</option><option value="male">Male</option>
+      </select></div>
+      <div><label for="height">Height <u data-unit-label="height">in</u></label>
+        <input id="height" type="number" step="0.1"></div>
+      <div><label for="mass">Body mass <u data-unit-label="mass">lb</u></label>
+        <input id="mass" type="number" step="0.1"></div>
+    </div>
+    <div class="hint" style="margin:12px 0 0">Sex is used only for physiological
+      modelling — VO₂max trajectory with age, bone-density baselines, and bone-stress
+      risk terms. Leave it unset and the sim uses pooled values.</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Recent training</legend>
+    <div class="hint">Weekly mileage is the single most important number here: it
+      seeds chronic load, which decides how much you can absorb in week one
+      without breaking.</div>
+    <div class="grid">
+      <div><label for="weekly">Weekly volume, last 4 wks <u data-unit-label="dist">mi</u></label>
+        <input id="weekly" type="number" step="0.1"></div>
+      <div><label for="peak_weekly">Highest week ever <u data-unit-label="dist">mi</u></label>
+        <input id="peak_weekly" type="number" step="0.1"></div>
+      <div><label for="longest">Longest recent run <u data-unit-label="dist">mi</u></label>
+        <input id="longest" type="number" step="0.1"></div>
+      <div><label for="runs_per_week">Runs per week</label>
+        <input id="runs_per_week" type="number" step="0.5"></div>
+      <div><label for="years_running">Years running</label>
+        <input id="years_running" type="number" step="0.5"></div>
+      <div><label for="strength">Strength days / week</label>
+        <input id="strength" type="number" step="0.5" value="0"></div>
+      <div><label for="cross">Cross-training hrs / week</label>
+        <input id="cross" type="number" step="0.5" value="0"></div>
+      <div><label for="surface">Usual surface</label><select id="surface">
+        <option value="road">Road</option><option value="trail">Trail</option>
+        <option value="track">Track</option><option value="treadmill">Treadmill</option>
+        <option value="grass">Grass</option>
+      </select></div>
+      <div><label for="hilliness">Typical climb <u data-unit-label="climb">ft/mi</u></label>
+        <input id="hilliness" type="number" step="1"></div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Race history</legend>
+    <div class="hint">Paste results from any timing site — select all, copy, paste.
+      Or drop in a CSV. Each row needs a distance and a finish time; if the distance
+      only appears in the page heading, include that line too. Fix anything it
+      misreads directly in the table.</div>
+    <textarea id="paste" placeholder="Springfield Half Marathon — April 15, 2024&#10;12   Jane Doe   841   34   1:34:40   1:34:22   7:12"></textarea>
+    <div class="row" style="margin-top:9px">
+      <button id="parse_btn" type="button">Parse paste</button>
+      <button id="add_race" class="ghost" type="button">Add row by hand</button>
+      <button id="clear_races" class="ghost" type="button">Clear all</button>
+    </div>
+    <div class="msg" id="paste_msg"></div>
+    <table style="margin-top:10px">
+      <thead><tr><th>Race</th><th>Date</th><th>Distance</th><th>Time</th>
+        <th style="width:56px">Place</th><th style="width:56px">Field</th><th></th></tr></thead>
+      <tbody id="race_rows"></tbody>
+    </table>
+    <div class="empty" id="race_empty">No races yet.</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Injury history</legend>
+    <div class="hint">Prior injury is the strongest single predictor of future
+      injury, so this genuinely changes the model. Tissue matters because bone and
+      tendon remodel over months while muscle recovers in days — the sim tracks
+      load against each separately.</div>
+    <button id="add_injury" class="ghost" type="button">Add injury</button>
+    <table style="margin-top:10px">
+      <thead><tr><th>Body part</th><th>Tissue</th><th>When</th>
+        <th style="width:74px">Weeks out</th><th style="width:74px">Recurrences</th><th></th></tr></thead>
+      <tbody id="injury_rows"></tbody>
+    </table>
+    <div class="empty" id="injury_empty">No injuries recorded.</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Physiology <span style="text-transform:none;letter-spacing:0;color:var(--muted);font-weight:400">— optional</span></legend>
+    <div class="hint">Absent, these get estimated from your race results and age.
+      Present, they tighten the training-zone model.</div>
+    <div class="grid">
+      <div><label for="resting_hr">Resting HR</label><input id="resting_hr" type="number"></div>
+      <div><label for="max_hr">Max HR <small>(measured)</small></label><input id="max_hr" type="number"></div>
+      <div><label for="vo2max">Lab VO₂max</label><input id="vo2max" type="number" step="0.1"></div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Life load</legend>
+    <div class="hint">Recovery is where adaptation actually happens. A nurse on
+      their feet twelve hours absorbs the same training week very differently from
+      a desk worker.</div>
+    <div class="grid">
+      <div><label for="sleep">Typical sleep (hrs)</label><input id="sleep" type="number" step="0.25"></div>
+      <div><label for="occupation">Occupation</label><select id="occupation">
+        <option value="sedentary">Desk / sedentary</option><option value="light">Light activity</option>
+        <option value="on_feet">On feet all day</option><option value="physical">Physically demanding</option>
+      </select></div>
+      <div><label for="stress">Life stress (1 calm – 5 maximal)</label>
+        <input id="stress" type="number" min="1" max="5" value="3"></div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Goal race</legend>
+    <div class="grid">
+      <div><label for="goal_name">Race</label><input id="goal_name" placeholder="Duke City Marathon"></div>
+      <div><label for="goal_date">Date</label><input id="goal_date" type="date"></div>
+      <div><label for="goal_distance">Distance</label><select id="goal_distance">
+        <option value="">—</option><option value="5000">5K</option><option value="10000">10K</option>
+        <option value="21097.5">Half marathon</option><option value="42195">Marathon</option>
+        <option value="50000">50K</option><option value="80467">50 mile</option>
+        <option value="160934">100 mile</option>
+      </select></div>
+      <div><label for="goal_target">Target time <small>(h:mm:ss)</small></label>
+        <input id="goal_target" placeholder="3:15:00"></div>
+      <div><label for="goal_gain">Course climb <u data-unit-label="gain">ft</u></label>
+        <input id="goal_gain" type="number" step="1"></div>
+      <div><label for="goal_surface">Surface</label><select id="goal_surface">
+        <option value="road">Road</option><option value="trail">Trail</option>
+        <option value="track">Track</option>
+      </select></div>
+    </div>
+  </fieldset>
+
+  <div class="row">
+    <button id="save_btn" type="button">Save profile</button>
+    <span class="msg" id="save_msg"></span>
+  </div>
+</div>
+
+<div class="rail">
+  <fieldset>
+    <legend>Units</legend>
+    <div class="toggle" role="group">
+      <button type="button" id="unit_mi" aria-pressed="true">Miles</button>
+      <button type="button" id="unit_km" aria-pressed="false">Kilometres</button>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Current fitness</legend>
+    <div id="fitness_body"><div class="empty">Add a race result to see your VDOT.</div></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Equivalent performances</legend>
+    <div class="hint" style="margin-bottom:10px">What this fitness predicts at every
+      standard distance, via Daniels–Gilbert.</div>
+    <div id="equiv_body"><div class="empty">—</div></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Career arc</legend>
+    <div class="hint" style="margin-bottom:10px">Peak VDOT per year. Gaps are as
+      informative as the peaks — a missing year usually means injury or life.</div>
+    <div id="traj_body"><div class="empty">Needs dated races across two or more years.</div></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Readiness</legend>
+    <div id="flags_body"><div class="empty">—</div></div>
+  </fieldset>
+</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const KM_PER_MI = 1.609344, M_PER_FT = 0.3048;
+let useMiles = true;
+
+/* ---------- unit handling: the form shows the runner's units, the payload is metric ---------- */
+const UNIT_LABELS = {
+  mi: { dist: 'mi', height: 'in', mass: 'lb', climb: 'ft/mi', gain: 'ft' },
+  km: { dist: 'km', height: 'cm', mass: 'kg', climb: 'm/km', gain: 'm' },
+};
+function applyUnits() {
+  const set = useMiles ? UNIT_LABELS.mi : UNIT_LABELS.km;
+  document.querySelectorAll('[data-unit-label]').forEach(el => {
+    el.textContent = set[el.dataset.unitLabel];
+  });
+  $('unit_mi').setAttribute('aria-pressed', String(useMiles));
+  $('unit_km').setAttribute('aria-pressed', String(!useMiles));
+  refresh();
+}
+$('unit_mi').onclick = () => { useMiles = true; applyUnits(); };
+$('unit_km').onclick = () => { useMiles = false; applyUnits(); };
+
+const num = id => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : null; };
+const str = id => $(id).value.trim() || null;
+const toKm = v => v === null ? null : (useMiles ? v * KM_PER_MI : v);
+const toCm = v => v === null ? null : (useMiles ? v * 2.54 : v);
+const toKg = v => v === null ? null : (useMiles ? v * 0.45359237 : v);
+const toM = v => v === null ? null : (useMiles ? v * M_PER_FT : v);
+// Climb is a ratio, so both the rise and the run convert: ft/mi -> m/km.
+const toMPerKm = v => v === null ? null : (useMiles ? v * M_PER_FT / KM_PER_MI : v);
+
+function parseClock(text) {
+  if (!text) return null;
+  const parts = String(text).trim().split(':').map(Number);
+  if (parts.some(n => !Number.isFinite(n))) return null;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 1) return parts[0] * 60;
+  return null;
+}
+function formatClock(seconds) {
+  if (seconds == null) return '';
+  const t = Math.round(seconds), h = Math.floor(t / 3600),
+        m = Math.floor((t % 3600) / 60), s = t % 60;
+  const pad = n => String(n).padStart(2, '0');
+  return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+function formatDistance(metres) {
+  const named = { 1609.344: '1 mile', 5000: '5K', 10000: '10K',
+                  21097.5: 'Half', 42195: 'Marathon', 50000: '50K' };
+  for (const [m, label] of Object.entries(named))
+    if (Math.abs(metres - Number(m)) < 1) return label;
+  return useMiles ? (metres / 1609.344).toFixed(2) + ' mi'
+                  : (metres / 1000).toFixed(2) + ' km';
+}
+
+/* ---------- races ---------- */
+let races = [];
+const DISTANCE_OPTIONS = [
+  ['1609.344', '1 mile'], ['3000', '3K'], ['5000', '5K'], ['8000', '8K'],
+  ['10000', '10K'], ['15000', '15K'], ['16093.44', '10 mile'],
+  ['21097.5', 'Half marathon'], ['42195', 'Marathon'], ['50000', '50K'],
+  ['80467', '50 mile'], ['160934', '100 mile'],
+];
+
+function renderRaces() {
+  const tbody = $('race_rows');
+  tbody.innerHTML = '';
+  $('race_empty').style.display = races.length ? 'none' : 'block';
+
+  races.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    const exact = DISTANCE_OPTIONS.some(([m]) => Math.abs(Number(m) - r.distance_m) < 1);
+    const options = DISTANCE_OPTIONS.map(([m, label]) =>
+      `<option value="${m}" ${Math.abs(Number(m) - r.distance_m) < 1 ? 'selected' : ''}>${label}</option>`
+    ).join('');
+    tr.innerHTML = `
+      <td><input value="${(r.name || '').replace(/"/g, '&quot;')}" data-f="name"></td>
+      <td><input type="date" value="${r.race_date || ''}" data-f="race_date"></td>
+      <td><select data-f="distance_m">${options}
+        <option value="other" ${exact ? '' : 'selected'}>${exact ? 'Other…' : formatDistance(r.distance_m)}</option>
+      </select></td>
+      <td><input value="${formatClock(r.finish_time_s)}" data-f="finish_time_s" placeholder="1:34:22"></td>
+      <td><input type="number" value="${r.place_overall ?? ''}" data-f="place_overall"></td>
+      <td><input type="number" value="${r.field_size ?? ''}" data-f="field_size"></td>
+      <td><button class="link" title="Remove" data-remove="${i}">×</button></td>`;
+
+    tr.querySelectorAll('[data-f]').forEach(el => {
+      el.onchange = () => {
+        const f = el.dataset.f;
+        if (f === 'finish_time_s') r.finish_time_s = parseClock(el.value) ?? r.finish_time_s;
+        else if (f === 'distance_m') { if (el.value !== 'other') r.distance_m = Number(el.value); }
+        else if (f === 'place_overall' || f === 'field_size')
+          r[f] = el.value === '' ? null : Number(el.value);
+        else r[f] = el.value || null;
+        renderRaces(); refresh();
+      };
+    });
+    tr.querySelector('[data-remove]').onclick = () => {
+      races.splice(i, 1); renderRaces(); refresh();
+    };
+    tbody.appendChild(tr);
+  });
+}
+
+$('parse_btn').onclick = async () => {
+  const text = $('paste').value;
+  const res = await fetch('/api/parse-races', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, surface: $('surface').value }),
+  });
+  const data = await res.json();
+  races = races.concat(data.races);
+  $('paste_msg').textContent = data.message;
+  $('paste_msg').className = 'msg' + (data.count ? ' ok' : '');
+  if (data.count) $('paste').value = '';
+  renderRaces(); refresh();
+};
+$('add_race').onclick = () => {
+  races.push({ distance_m: 5000, finish_time_s: 1500, race_date: null,
+               name: '', place_overall: null, field_size: null,
+               surface: 'road', source: 'manual' });
+  renderRaces(); refresh();
+};
+$('clear_races').onclick = () => {
+  races = []; $('paste_msg').textContent = ''; renderRaces(); refresh();
+};
+
+/* ---------- injuries ---------- */
+let injuries = [];
+const TISSUES = ['bone', 'tendon', 'muscle', 'joint', 'fascia', 'other'];
+
+function renderInjuries() {
+  const tbody = $('injury_rows');
+  tbody.innerHTML = '';
+  $('injury_empty').style.display = injuries.length ? 'none' : 'block';
+
+  injuries.forEach((inj, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input value="${(inj.body_part || '').replace(/"/g, '&quot;')}"
+           data-f="body_part" placeholder="left achilles"></td>
+      <td><select data-f="tissue">${TISSUES.map(t =>
+           `<option value="${t}" ${t === inj.tissue ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
+      <td><input type="date" value="${inj.start_date || ''}" data-f="start_date"></td>
+      <td><input type="number" step="0.5" value="${inj.weeks_out ?? ''}" data-f="weeks_out"></td>
+      <td><input type="number" value="${inj.recurrences ?? 0}" data-f="recurrences"></td>
+      <td><button class="link" title="Remove" data-remove="${i}">×</button></td>`;
+
+    tr.querySelectorAll('[data-f]').forEach(el => {
+      el.onchange = () => {
+        const f = el.dataset.f;
+        if (f === 'weeks_out') inj[f] = el.value === '' ? null : Number(el.value);
+        else if (f === 'recurrences') inj[f] = Number(el.value) || 0;
+        else inj[f] = el.value || null;
+        refresh();
+      };
+    });
+    tr.querySelector('[data-remove]').onclick = () => {
+      injuries.splice(i, 1); renderInjuries(); refresh();
+    };
+    tbody.appendChild(tr);
+  });
+}
+$('add_injury').onclick = () => {
+  injuries.push({ tissue: 'tendon', body_part: '', start_date: null,
+                  weeks_out: null, recurrences: 0, notes: '' });
+  renderInjuries(); refresh();
+};
+
+/* ---------- assembling the payload ---------- */
+function buildProfile() {
+  const profile = {
+    name: str('name') || '',
+    birth_date: str('birth_date'),
+    sex: $('sex').value,
+    physiology: {
+      resting_hr: num('resting_hr'), max_hr: num('max_hr'),
+      vo2max_tested: num('vo2max'),
+      height_cm: toCm(num('height')), body_mass_kg: toKg(num('mass')),
+    },
+    training: {
+      current_weekly_km: toKm(num('weekly')),
+      peak_weekly_km_ever: toKm(num('peak_weekly')),
+      longest_recent_run_km: toKm(num('longest')),
+      runs_per_week: num('runs_per_week'),
+      years_running: num('years_running'),
+      strength_days_per_week: num('strength') ?? 0,
+      cross_training_hours_per_week: num('cross') ?? 0,
+      primary_surface: $('surface').value,
+      hilliness_m_per_km: toMPerKm(num('hilliness')),
+    },
+    life: {
+      sleep_hours: num('sleep'), occupation: $('occupation').value,
+      life_stress: num('stress') ?? 3,
+    },
+    // Only complete rows go to the server; the schema requires these fields.
+    races: races.filter(r => r.distance_m > 0 && r.finish_time_s > 0).map(r => ({
+      distance_m: r.distance_m, finish_time_s: r.finish_time_s,
+      race_date: r.race_date || null, name: r.name || '',
+      place_overall: r.place_overall, field_size: r.field_size,
+      surface: r.surface || 'road', source: r.source || 'manual',
+    })),
+    injuries: injuries.filter(i => i.body_part).map(i => ({
+      tissue: i.tissue, body_part: i.body_part, start_date: i.start_date || null,
+      weeks_out: i.weeks_out, recurrences: i.recurrences || 0, notes: i.notes || '',
+    })),
+  };
+
+  const goalDistance = parseFloat($('goal_distance').value);
+  const goalDate = str('goal_date');
+  if (Number.isFinite(goalDistance) && goalDate) {
+    profile.goal = {
+      distance_m: goalDistance, race_date: goalDate, name: str('goal_name') || '',
+      target_time_s: parseClock($('goal_target').value),
+      elevation_gain_m: toM(num('goal_gain')), surface: $('goal_surface').value,
+    };
+  }
+  return profile;
+}
+
+/* ---------- the live insights rail ---------- */
+function renderTrajectory(points) {
+  if (points.length < 2) {
+    $('traj_body').innerHTML =
+      '<div class="empty">Needs dated races across two or more years.</div>';
+    return;
+  }
+  const W = 300, H = 110, pad = { l: 26, r: 8, t: 10, b: 20 };
+  const years = points.map(p => p.year), vdots = points.map(p => p.vdot);
+  const minY = Math.min(...years), maxY = Math.max(...years);
+  const minV = Math.floor(Math.min(...vdots) - 2), maxV = Math.ceil(Math.max(...vdots) + 2);
+  const x = y => pad.l + (maxY === minY ? 0 : (y - minY) / (maxY - minY)) * (W - pad.l - pad.r);
+  const yy = v => H - pad.b - (v - minV) / (maxV - minV || 1) * (H - pad.t - pad.b);
+  const path = points.map((p, i) => `${i ? 'L' : 'M'}${x(p.year).toFixed(1)},${yy(p.vdot).toFixed(1)}`).join('');
+  const dots = points.map(p =>
+    `<circle cx="${x(p.year).toFixed(1)}" cy="${yy(p.vdot).toFixed(1)}" r="3" fill="#a3c057">
+       <title>${p.year}: VDOT ${p.vdot}</title></circle>`).join('');
+  $('traj_body').innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}">
+      <line class="axis" x1="${pad.l}" y1="${H - pad.b}" x2="${W - pad.r}" y2="${H - pad.b}"/>
+      <line class="axis" x1="${pad.l}" y1="${pad.t}" x2="${pad.l}" y2="${H - pad.b}"/>
+      <text x="2" y="${yy(maxV) + 4}">${maxV}</text>
+      <text x="2" y="${yy(minV) + 4}">${minV}</text>
+      <text x="${pad.l}" y="${H - 6}">${minY}</text>
+      <text x="${W - pad.r}" y="${H - 6}" text-anchor="end">${maxY}</text>
+      <path d="${path}" fill="none" stroke="#a3c057" stroke-width="2"
+            stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}
+    </svg>`;
+}
+
+let refreshTimer = null;
+function refresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(doRefresh, 220); }
+
+async function doRefresh() {
+  const res = await fetch('/api/insights', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profile: buildProfile() }),
+  });
+  if (!res.ok) return;
+  const data = await res.json();
+
+  if (data.fitness) {
+    const f = data.fitness;
+    $('fitness_body').innerHTML = `
+      <div class="stat">${f.vdot}<small> VDOT</small>
+        <span class="badge ${f.confidence}">${f.confidence}</span></div>
+      <div class="hint" style="margin:11px 0 0">${f.note}</div>`;
+    $('equiv_body').innerHTML = f.equivalents.map(e =>
+      `<div class="equiv"><span>${e.label}</span><b>${e.time}</b></div>`).join('');
+  } else {
+    $('fitness_body').innerHTML = '<div class="empty">Add a race result to see your VDOT.</div>';
+    $('equiv_body').innerHTML = '<div class="empty">—</div>';
+  }
+
+  renderTrajectory(data.trajectory);
+  $('flags_body').innerHTML = data.flags.length
+    ? data.flags.map(f => `<div class="flag ${f.severity}"><i></i><span>${f.message}</span></div>`).join('')
+    : '<div class="empty">Nothing flagged.</div>';
+}
+
+$('save_btn').onclick = async () => {
+  const res = await fetch('/api/save', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profile: buildProfile() }),
+  });
+  const data = await res.json();
+  const msg = $('save_msg');
+  if (res.ok) {
+    msg.className = 'msg ok';
+    msg.innerHTML = 'Saved to <span class="saved">' + data.path + '</span>';
+  } else {
+    msg.className = 'msg';
+    msg.textContent = data.detail || 'Could not save.';
+  }
+};
+
+document.querySelectorAll('input, select').forEach(el => {
+  el.addEventListener('change', refresh);
+});
+applyUnits();
+renderRaces();
+renderInjuries();
+</script>
+</body>
+</html>

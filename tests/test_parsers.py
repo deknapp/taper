@@ -86,3 +86,25 @@ def test_csv_roundtrip():
     assert races[0].place_overall == 1204
     assert races[0].field_size == 25000
     assert races[1].finish_time_s == 1182.0
+
+
+def test_heading_supplies_the_race_name_not_the_runner():
+    """In a single-race results table the heading holds the race name and the
+    rows hold runner names, so rows must not claim their runner as the race."""
+    blob = (
+        "Duke City Marathon - Oct 20, 2024\n"
+        "1204   Jane Doe    3:12:44   7:21\n"
+        "1205   Ann Roe     3:12:59   7:21\n"
+    )
+    races = parse_pasted_results(blob)
+    assert len(races) == 2
+    assert {r.name for r in races} == {"Duke City Marathon"}
+    assert races[0].distance_m == 42195.0
+    assert races[0].race_date == date(2024, 10, 20)
+
+
+def test_per_line_races_keep_their_own_names():
+    """When each line carries its own distance it also carries its own name."""
+    races = parse_pasted_results(
+        "Boston Marathon 2024-04-15 3:12:44\nTurkey Trot 5K 2023-11-23 19:42\n")
+    assert [r.name for r in races] == ["Boston Marathon", "Turkey Trot"]

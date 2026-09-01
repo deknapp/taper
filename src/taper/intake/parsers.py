@@ -190,34 +190,43 @@ def parse_pasted_results(blob: str, default_surface: Surface = Surface.ROAD) -> 
     races: list[RaceResult] = []
     context_distance: float | None = None
     context_date: date | None = None
+    context_name: str = ""
 
     for raw in blob.splitlines():
         line = raw.strip()
         if not line or _looks_like_header(line):
             continue
 
-        distance = parse_distance(line)
+        own_distance = parse_distance(line)
         time_s = parse_finish_time(line)
         when = parse_date(line)
 
-        # A heading line: names a distance and/or date but has no result on it.
+        # A heading line: names a distance and/or date but carries no result.
+        # It usually holds the race name too, which the result rows will not --
+        # those carry the runner's name instead.
         if time_s is None:
-            if distance is not None:
-                context_distance = distance
+            if own_distance is not None:
+                context_distance = own_distance
             if when is not None:
                 context_date = when
+            if own_distance is not None or when is not None:
+                context_name = _guess_race_name(line)
             continue
 
-        distance = distance or context_distance
+        distance = own_distance if own_distance is not None else context_distance
         if distance is None:
             continue
+
+        # If the distance came from a heading rather than this line, the name
+        # almost certainly did too -- what is on this line is the runner.
+        name = _guess_race_name(line) if own_distance is not None else context_name
 
         place, field_size = parse_placing(line)
         races.append(RaceResult(
             distance_m=distance,
             finish_time_s=time_s,
             race_date=when or context_date,
-            name=_guess_race_name(line),
+            name=name,
             place_overall=place,
             field_size=field_size,
             surface=default_surface,
@@ -230,19 +239,27 @@ def parse_pasted_results(blob: str, default_surface: Surface = Surface.ROAD) -> 
 _RE_NAME_NOISE = re.compile(
     r"\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?"      # times
     r"|\d+(?:\.\d+)?\s*(?:k|km|mi|miles?|m)\b"  # distances
-    r"|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4}"
-    r"|\b\d+\s*(?:/|of)\s*\d+\b",
+    r"|\b\d+\s*(?:/|of)\s*\d+\b"              # placings
+    r"|\b(?:19|20)\d{2}\b",                     # bare years
     re.I,
 )
 
 
 def _guess_race_name(line: str) -> str:
-    """Strip the machine-readable bits and keep whatever prose is left."""
-    text = _RE_NAME_NOISE.sub(" ", line)
+    """Strip the machine-readable bits and keep whatever prose is left.
+
+    Dates go first and in full, using the same patterns that read them, so that
+    a heading like "Duke City Marathon - Oct 20, 2024" does not leave a stray
+    "Oct" glued to the race name.
+    """
+    text = _RE_DATE_CANDIDATES.sub(" ", line)
+    text = _RE_NAME_NOISE.sub(" ", text)
     text = re.sub(r"[\t|,;]+", " ", text)
-    text = re.sub(r"\s{2,}", " ", text).strip(" -–—")
+    text = re.sub(r"\s{2,}", " ", text)
+    # Trim separators left behind where a date or time used to be.
+    text = text.strip(" \t-–—:.")
     words = [w for w in text.split() if not w.isdigit()]
-    return " ".join(words)[:120].strip()
+    return " ".join(words)[:120].strip(" -–—")
 
 
 def parse_csv_results(blob: str, default_surface: Surface = Surface.ROAD) -> list[RaceResult]:

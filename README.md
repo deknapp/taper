@@ -37,13 +37,25 @@ pretends the whole thing is settled.
 
 ## Status
 
-Early. The intake layer is being built first: the profile schema everything else
-hangs off, the published physiology models, and an importer for race history.
-The simulation engine comes next.
+Early. The intake layer is done; the simulation engine is next.
+
+```sh
+uv run taper intake          # fill in the form at localhost:8000
+uv run taper show profiles/you.json
+```
+
+The form asks for the runner, their recent training, race history, injury
+history, life load and goal race, and derives what it can as you type: VDOT for
+every race, peak VDOT per year as a career arc, a present-day fitness estimate
+labelled by confidence, equivalent times at every standard distance, and
+readiness flags against the goal. It runs on localhost and writes a JSON file.
+No account, no network, nothing leaves the machine.
 
 - `taper/athlete.py` -- the athlete profile: the schema the intake form fills
 - `taper/physiology.py` -- Daniels-Gilbert VDOT, Riegel, Minetti gradient cost
-- `taper/intake/parsers.py` -- race-history import from pasted text or CSV
+- `taper/insights.py` -- what can be derived from a profile without simulating
+- `taper/intake/` -- the local web form and the race-history importer
+- `taper/profile_io.py` -- versioned JSON persistence
 
 ## Importing race history
 
