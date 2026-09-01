@@ -24,6 +24,16 @@ def main(argv: list[str] | None = None) -> int:
     show = sub.add_parser("show", help="print a summary of a saved profile")
     show.add_argument("path")
 
+    imp = sub.add_parser(
+        "import-strava",
+        help="import a Strava bulk export's activities.csv into the training log")
+    imp.add_argument("path", help="path to activities.csv from your Strava archive")
+    imp.add_argument("--db", default="taper.db", help="database file (default: taper.db)")
+    imp.add_argument("--athlete", type=int, default=None,
+                     help="athlete id (default: the most recently updated)")
+    imp.add_argument("--dry-run", action="store_true",
+                     help="report what would be imported without writing")
+
     args = parser.parse_args(argv)
 
     if args.command == "intake":
@@ -40,7 +50,81 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "show":
         return _show(args.path)
 
+    if args.command == "import-strava":
+        return _import_strava(args.path, args.db, args.athlete, args.dry_run)
+
     return 1
+
+
+def _import_strava(path: str, db_path: str, athlete_id: int | None, dry_run: bool) -> int:
+    from pathlib import Path
+
+    from taper.db import Database
+    from taper.importers.strava import parse_activities_csv
+    from taper.layoffs import find_layoffs
+    from taper.records import detect_records, rejected_efforts
+
+    source = Path(path)
+    if not source.exists():
+        print(f"No such file: {source}")
+        return 1
+
+    result = parse_activities_csv(source.read_text(errors="replace"))
+    if not result.days:
+        for warning in result.warnings:
+            print(f"  {warning}")
+        return 1
+
+    print(f"Read {result.rows_seen} rows from {source.name}")
+    print(f"  {result.runs_used} runs, {result.cross_used} cross-training sessions")
+    print(f"  {result.first_day} to {result.last_day}")
+    print(f"  {len(result.days)} day rows, including {result.rest_days_filled} rest days")
+    if result.skipped_types:
+        skipped = ", ".join(f"{name} x{n}" for name, n in
+                            sorted(result.skipped_types.items(), key=lambda kv: -kv[1])[:6])
+        print(f"  skipped: {skipped}")
+    for warning in result.warnings:
+        print(f"  note: {warning}")
+
+    layoffs = find_layoffs(result.days)
+    if layoffs:
+        print(f"\n{len(layoffs)} possible layoff{'s' if len(layoffs) != 1 else ''} "
+              f"found in the log. These are candidates, not conclusions -- confirm or "
+              f"dismiss each one before the injury model uses it:")
+        for layoff in layoffs:
+            print(f"  [{layoff.confidence:>8}] {layoff.start} to {layoff.end} "
+                  f"({layoff.days}d, {layoff.kind})")
+            print(f"             {layoff.reason}")
+
+    records = detect_records(result.days, [])
+    if records:
+        print("\nPersonal records in the log, on terrain that makes them comparable:")
+        for record in records:
+            print(f"  {record.label:<16}{record.effort.formatted_time:>9}  "
+                  f"{record.set_on}  {record.effort.name[:32]}")
+    rejected = rejected_efforts(result.days, [])
+    if rejected:
+        print(f"\n{len(rejected)} fast effort{'s' if len(rejected) != 1 else ''} "
+              f"excluded by the terrain screen (use --dry-run output to review):")
+        for effort in rejected[:5]:
+            print(f"  {effort.label:<8}{effort.formatted_time:>9}  {effort.reason[:66]}")
+
+    if dry_run:
+        print("\nDry run -- nothing written.")
+        return 0
+
+    db = Database(db_path)
+    try:
+        target = athlete_id or db.default_athlete_id()
+        if target is None:
+            print("\nNo athlete in the database yet. Run 'taper intake' first to "
+                  "create one, then import again.")
+            return 1
+        written = db.upsert_training_days(target, result.days)
+        print(f"\nWrote {written} training days to {db_path} for athlete {target}.")
+    finally:
+        db.close()
+    return 0
 
 
 def _show(path: str) -> int:

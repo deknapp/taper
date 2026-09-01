@@ -91,7 +91,9 @@ class TrainingDay:
     avg_hr: int | None = None
     rpe: float | None = None              # session RPE, Borg CR10 (1-10)
     elevation_gain_m: float | None = None
+    elevation_loss_m: float | None = None
     surface: Surface = Surface.ROAD
+    name: str = ""
     kind: str = "easy"                    # easy | long | workout | race | cross | off
     source: str = "manual"                # 'manual', 'estimated', or an import name
     notes: str = ""
