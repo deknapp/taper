@@ -13,3 +13,20 @@ wheels/
 .env
 *.local.json
 profiles/
+
+# Personal data. This is a public repo and the database holds a real training
+# log: injury history, symptoms, body mass, where and when someone runs. None
+# of it belongs in version control.
+taper.db
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Strava bulk exports and anything unpacked from one
+activities.csv
+export_*/
+*.gpx
+*.fit
+*.tcx
