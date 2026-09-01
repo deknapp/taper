@@ -76,6 +76,32 @@ class RaceResult:
 
 
 @dataclass
+class TrainingDay:
+    """One real day of training, logged or imported.
+
+    The Banister model consumes a daily impulse series, so this -- not the
+    weekly summary in `TrainingBackground` -- is what the engine actually runs
+    on. A day with no running still matters: rest is what lets fatigue decay,
+    so days off are stored explicitly rather than left as gaps.
+    """
+
+    day: date
+    distance_km: float = 0.0
+    duration_s: float | None = None
+    avg_hr: int | None = None
+    rpe: float | None = None              # session RPE, Borg CR10 (1-10)
+    elevation_gain_m: float | None = None
+    surface: Surface = Surface.ROAD
+    kind: str = "easy"                    # easy | long | workout | race | cross | off
+    source: str = "manual"                # 'manual', 'estimated', or an import name
+    notes: str = ""
+
+    @property
+    def is_rest(self) -> bool:
+        return self.distance_km <= 0 and not self.duration_s
+
+
+@dataclass
 class Injury:
     """Prior injury is the strongest single predictor of future injury in the
     literature, so history here materially changes the hazard model."""
@@ -147,6 +173,7 @@ class AthleteProfile:
     life: LifeLoad = field(default_factory=LifeLoad)
     races: list[RaceResult] = field(default_factory=list)
     injuries: list[Injury] = field(default_factory=list)
+    training_days: list[TrainingDay] = field(default_factory=list)
     goal: GoalRace | None = None
 
     def age_on(self, when: date) -> float | None:
