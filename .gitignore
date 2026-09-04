@@ -30,3 +30,8 @@ export_*/
 *.gpx
 *.fit
 *.tcx
+
+# Record exports. Same reasoning as the database: a record history carries real
+# race names, dates and finishing places, which is a map of where someone was.
+*-records-*.txt
+*.records.txt
