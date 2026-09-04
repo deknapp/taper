@@ -173,12 +173,21 @@ def summarise(profile: AthleteProfile, today: date | None = None) -> RealHistory
                 f"Your training log stops {stale} days ago. Fitness and fatigue are "
                 f"both decayed forward from there, which gets less trustworthy the "
                 f"longer the gap.")
-        estimated = coverage.methods.get("distance", 0)
-        if estimated > coverage.days_logged * 0.5:
+        # Both 'pace' and 'distance' days lack a heart rate and an RPE; they
+        # differ only in whether the duration was real or assumed. Counting the
+        # 'distance' tier alone let a whole Strava import from someone without a
+        # monitor pass without comment, while the importer was warning about
+        # exactly that.
+        inferred = coverage.methods.get("pace", 0) + coverage.methods.get("distance", 0)
+        assumed = coverage.methods.get("distance", 0)
+        if inferred > coverage.days_logged * 0.5:
+            detail = (f" On {assumed} of them the duration was assumed too, leaving "
+                      f"distance as the only real measurement.") if assumed else ""
             warnings.append(
-                f"{estimated} of {coverage.days_logged} logged days have neither heart "
+                f"{inferred} of {coverage.days_logged} logged days have neither heart "
                 f"rate nor a perceived-effort rating, so their load is inferred from "
-                f"distance alone. Adding RPE is the cheapest way to improve this.")
+                f"pace rather than measured.{detail} Adding RPE is the cheapest way to "
+                f"improve this.")
 
     if len(profile.races) > len(dated):
         warnings.append(
