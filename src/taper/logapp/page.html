@@ -107,6 +107,7 @@
   <p class="sub">What you did, and how your body felt about it. Everything here is
     written straight to <code>taper.db</code> on this machine.</p>
   <nav id="tabs">
+    <button data-tab="you">You</button>
     <button data-tab="day" aria-selected="true">Today</button>
     <button data-tab="log">Training log</button>
     <button data-tab="races">Races &amp; PRs</button>
@@ -129,6 +130,93 @@
 
 <div id="app" class="wrap hidden">
 <div class="col">
+
+  <!-- ============ YOU ============ -->
+  <section data-panel="you" class="hidden">
+    <fieldset><legend>Heart rate</legend>
+      <p class="hint" id="hrPitch"></p>
+      <div class="grid">
+        <div><label for="p_rhr">Resting HR</label>
+          <input type="number" id="p_rhr" min="25" max="120" placeholder="e.g. 48"></div>
+        <div><label for="p_maxhr">Maximum HR</label>
+          <input type="number" id="p_maxhr" min="120" max="230" placeholder="e.g. 188"></div>
+        <div><label for="p_birth">Date of birth</label>
+          <input type="date" id="p_birth"></div>
+        <div><label for="p_sex">Sex</label><select id="p_sex">
+          <option value="unspecified">Prefer not to say</option>
+          <option value="female">Female</option><option value="male">Male</option>
+        </select></div>
+      </div>
+      <p class="hint" id="maxHrHint" style="margin:10px 0 0"></p>
+    </fieldset>
+
+    <fieldset><legend>Body</legend>
+      <div class="grid">
+        <div><label for="p_height">Height (cm)</label>
+          <input type="number" id="p_height" step="0.5" placeholder="—"></div>
+        <div><label for="p_mass">Body mass (kg)</label>
+          <input type="number" id="p_mass" step="0.1" placeholder="—"></div>
+        <div><label for="p_vo2">Tested VO2max</label>
+          <input type="number" id="p_vo2" step="0.1" placeholder="only if lab tested"></div>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>Training background</legend>
+      <p class="hint">Weekly volume is the single most important number here: it seeds
+        chronic load, which sets how much you can absorb before something gives.</p>
+      <div class="grid">
+        <div><label for="p_weekly">Current km/week</label>
+          <input type="number" id="p_weekly" step="0.5" placeholder="—"></div>
+        <div><label for="p_peak">Peak km/week ever</label>
+          <input type="number" id="p_peak" step="0.5" placeholder="—"></div>
+        <div><label for="p_longest">Longest recent run (km)</label>
+          <input type="number" id="p_longest" step="0.5" placeholder="—"></div>
+        <div><label for="p_rpw">Runs per week</label>
+          <input type="number" id="p_rpw" step="0.5" placeholder="—"></div>
+        <div><label for="p_years">Years running</label>
+          <input type="number" id="p_years" step="0.5" placeholder="—"></div>
+        <div><label for="p_strength">Strength days/week</label>
+          <input type="number" id="p_strength" step="0.5" placeholder="0"></div>
+        <div><label for="p_surface">Usual surface</label><select id="p_surface">
+          <option value="road">Road</option><option value="trail">Trail</option>
+          <option value="track">Track</option><option value="treadmill">Treadmill</option>
+          <option value="grass">Grass</option>
+        </select></div>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>Life load</legend>
+      <p class="hint">A nurse on their feet twelve hours recovers differently from a
+        desk worker doing the identical training week.</p>
+      <div class="grid">
+        <div><label for="p_sleep">Typical sleep (h)</label>
+          <input type="number" id="p_sleep" step="0.25" placeholder="—"></div>
+        <div><label for="p_occupation">Occupation</label><select id="p_occupation">
+          <option value="sedentary">Mostly sitting</option>
+          <option value="light">Light activity</option>
+          <option value="on_feet">On my feet</option>
+          <option value="physical">Physically demanding</option>
+        </select></div>
+        <div><label for="p_stress">Life stress (1–5)</label>
+          <input type="number" id="p_stress" min="1" max="5" placeholder="3"></div>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>Goal race</legend>
+      <div class="grid">
+        <div><label for="p_goaldist">Distance</label><select id="p_goaldist">
+          <option value="">No goal set</option>
+        </select></div>
+        <div><label for="p_goaldate">Date</label><input type="date" id="p_goaldate"></div>
+        <div><label for="p_goalname">Name</label><input id="p_goalname" placeholder="—"></div>
+        <div><label for="p_goaltime">Target time</label>
+          <input id="p_goaltime" placeholder="3:29:00"></div>
+      </div>
+    </fieldset>
+
+    <div class="row"><button id="saveProfile">Save your details</button></div>
+    <div class="msg" id="profileMsg"></div>
+  </section>
 
   <!-- ============ TODAY ============ -->
   <section data-panel="day">
@@ -456,12 +544,73 @@ async function load(id) {
   ).join("");
   $("downloadRecords").href = `/api/export/records.txt?athlete=${athleteId}`;
 
-  renderRail(); renderLog(); renderRaces(); renderEpisodes();
+  renderProfile(); renderRail(); renderLog(); renderRaces(); renderEpisodes();
   renderLayoffs(); renderSymptoms(); renderRecords();
   prefillToday();
 }
 
 // -- rail ------------------------------------------------------------------
+
+function renderProfile() {
+  const p = STATE.profile || {};
+  const set = (id, value) => { $(id).value = value ?? ""; };
+  set("p_rhr", p.resting_hr); set("p_maxhr", p.max_hr);
+  set("p_birth", p.birth_date); $("p_sex").value = p.sex || "unspecified";
+  set("p_height", p.height_cm); set("p_mass", p.body_mass_kg);
+  set("p_vo2", p.vo2max_tested);
+  set("p_weekly", p.current_weekly_km); set("p_peak", p.peak_weekly_km_ever);
+  set("p_longest", p.longest_recent_run_km); set("p_rpw", p.runs_per_week);
+  set("p_years", p.years_running); set("p_strength", p.strength_days_per_week);
+  $("p_surface").value = p.primary_surface || "road";
+  set("p_sleep", p.sleep_hours);
+  $("p_occupation").value = p.occupation || "sedentary";
+  set("p_stress", p.life_stress);
+
+  $("p_goaldist").innerHTML = `<option value="">No goal set</option>` +
+    DISTANCES.map(([label, m]) =>
+      `<option value="${m}" ${Math.abs((p.goal_distance_m || 0) - m) < 1 ? "selected" : ""}>${label}</option>`).join("");
+  set("p_goaldate", p.goal_date); set("p_goalname", p.goal_name);
+  $("p_goaltime").value = p.goal_target_time_s ? showDuration(p.goal_target_time_s) : "";
+
+  // Say what filling this in actually buys, using this log's own numbers.
+  const s = STATE.summary, unused = s.hr_days_unusable;
+  $("hrPitch").innerHTML = unused
+    ? `<b>${unused} logged days already carry a heart rate the model cannot read.</b>
+       Load needs your resting and maximum HR to turn a heart rate into an intensity.
+       These two numbers promote all ${unused} of those days from estimated to measured
+       — the single biggest gain available to this log.`
+    : `Load uses heart rate where it can. Resting and maximum HR are what turn a
+       recorded heart rate into an intensity the model can use.`;
+
+  const age = p.age;
+  $("maxHrHint").textContent = age
+    ? `If you have never measured it, Tanaka's estimate for age ${age} is about `
+      + `${Math.round(208 - 0.7 * age)} bpm — but a measured value is worth far more, `
+      + `since the estimate's error runs to ±10 bpm.`
+    : "Add a date of birth and an age-based estimate of maximum HR can be offered.";
+}
+
+$("saveProfile").addEventListener("click", async () => {
+  const target = parseDuration($("p_goaltime").value);
+  try {
+    await api("/api/profile", {
+      athlete_id: athleteId, name: STATE.profile.name,
+      birth_date: $("p_birth").value || null, sex: $("p_sex").value,
+      height_cm: num("p_height"), body_mass_kg: num("p_mass"),
+      resting_hr: int("p_rhr"), max_hr: int("p_maxhr"), vo2max_tested: num("p_vo2"),
+      current_weekly_km: num("p_weekly"), peak_weekly_km_ever: num("p_peak"),
+      longest_recent_run_km: num("p_longest"), runs_per_week: num("p_rpw"),
+      years_running: num("p_years"), strength_days_per_week: num("p_strength") || 0,
+      primary_surface: $("p_surface").value, sleep_hours: num("p_sleep"),
+      occupation: $("p_occupation").value, life_stress: int("p_stress") || 3,
+      goal_distance_m: parseFloat($("p_goaldist").value) || null,
+      goal_date: $("p_goaldate").value || null, goal_name: $("p_goalname").value,
+      goal_target_time_s: target,
+    });
+    say("profileMsg", "Saved.", "ok");
+    await load(athleteId);
+  } catch (err) { say("profileMsg", err.message, "bad"); }
+});
 
 function renderRail() {
   const s = STATE.summary;

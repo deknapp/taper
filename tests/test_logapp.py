@@ -360,3 +360,91 @@ def test_two_athletes_keep_separate_logs(client):
 
     assert len(state(client, athlete=first)["training_days"]) == 1
     assert state(client, athlete=second)["training_days"] == []
+
+
+# -- the athlete's own numbers --------------------------------------------
+
+def test_the_profile_round_trips(runner):
+    runner.post("/api/profile", json={
+        "name": "Test Runner", "birth_date": "1990-06-01", "sex": "female",
+        "height_cm": 170, "body_mass_kg": 62.5, "resting_hr": 48, "max_hr": 188,
+        "current_weekly_km": 64, "runs_per_week": 6, "years_running": 11,
+        "primary_surface": "trail", "sleep_hours": 7.5, "occupation": "on_feet",
+        "life_stress": 4})
+    p = state(runner)["profile"]
+    assert p["resting_hr"] == 48 and p["max_hr"] == 188
+    assert p["sex"] == "female"
+    assert p["primary_surface"] == "trail"
+    assert p["occupation"] == "on_feet"
+    assert p["age"] and p["age"] > 30
+
+
+def test_saving_heart_rate_zones_does_not_delete_the_races(runner):
+    # save_profile replaces races wholesale, so this is the bug the endpoint has
+    # to avoid: entering a resting heart rate must not wipe a race history.
+    runner.post("/api/races", json={"races": [
+        {"distance_m": 5000, "finish_time_s": 1200, "race_date": "2024-05-01",
+         "name": "Spring 5K"}]})
+    runner.post("/api/profile", json={"resting_hr": 48, "max_hr": 188})
+
+    races = state(runner)["races"]
+    assert len(races) == 1
+    assert races[0]["name"] == "Spring 5K"
+
+
+def test_saving_the_profile_does_not_disturb_the_training_log(runner):
+    runner.post("/api/training-day", json={"day": TODAY, "distance_km": 10})
+    runner.post("/api/profile", json={"resting_hr": 48, "max_hr": 188})
+    assert len(state(runner)["training_days"]) == 1
+
+
+def test_heart_rate_zones_promote_logged_days_to_measured(runner):
+    runner.post("/api/training-day", json={
+        "day": TODAY, "distance_km": 10, "duration_s": 3000, "avg_hr": 150})
+    assert state(runner)["summary"]["methods"].get("hr", 0) == 0
+
+    runner.post("/api/profile", json={"resting_hr": 48, "max_hr": 188})
+    assert state(runner)["summary"]["methods"]["hr"] == 1
+
+
+def test_the_page_is_told_how_many_days_the_zones_would_unlock(runner):
+    for offset in range(3):
+        runner.post("/api/training-day", json={
+            "day": (date.today() - timedelta(days=offset)).isoformat(),
+            "distance_km": 10, "duration_s": 3000, "avg_hr": 150})
+    assert state(runner)["summary"]["hr_days_unusable"] == 3
+
+    runner.post("/api/profile", json={"resting_hr": 48, "max_hr": 188})
+    assert state(runner)["summary"]["hr_days_unusable"] == 0
+
+
+def test_a_maximum_below_resting_is_refused(runner):
+    response = runner.post("/api/profile", json={"resting_hr": 180, "max_hr": 60})
+    assert response.status_code == 400
+    assert "above resting" in response.json()["detail"]
+
+
+def test_a_goal_race_round_trips(runner):
+    runner.post("/api/profile", json={
+        "goal_distance_m": 42195, "goal_date": "2027-04-18",
+        "goal_name": "Boston", "goal_target_time_s": 12540})
+    p = state(runner)["profile"]
+    assert p["goal_distance_m"] == 42195
+    assert p["goal_name"] == "Boston"
+
+
+def test_a_goal_without_a_date_is_not_stored_as_half_a_goal(runner):
+    runner.post("/api/profile", json={"goal_distance_m": 42195, "goal_date": None})
+    assert state(runner)["profile"]["goal_distance_m"] is None
+
+
+def test_an_unknown_sex_or_occupation_falls_back_rather_than_failing(runner):
+    runner.post("/api/profile", json={"sex": "banana", "occupation": "astronaut"})
+    p = state(runner)["profile"]
+    assert p["sex"] == "unspecified"
+    assert p["occupation"] == "sedentary"
+
+
+def test_a_blank_name_does_not_erase_the_existing_one(runner):
+    runner.post("/api/profile", json={"name": "  ", "resting_hr": 48})
+    assert state(runner)["profile"]["name"] == "Test Runner"

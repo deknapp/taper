@@ -18,8 +18,8 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from taper.athlete import (
-    AthleteProfile, Injury, InjuryEpisode, RaceResult, Surface, Symptom, Tissue,
-    TrainingDay, Wellness,
+    AthleteProfile, GoalRace, Injury, InjuryEpisode, Occupation, RaceResult, Sex,
+    Surface, Symptom, Tissue, TrainingDay, Wellness,
 )
 from taper.db import DEFAULT_DB_PATH, Database
 from taper.export import records_report, suggested_filename
@@ -79,6 +79,34 @@ def _resolve(database: Database, athlete_id: int | None) -> int:
 
 class AthleteRequest(BaseModel):
     name: str = ""
+
+
+class ProfileRequest(BaseModel):
+    """The athlete's own numbers. Separate from the log, and rarely changed."""
+
+    athlete_id: int | None = None
+    name: str = ""
+    birth_date: str | None = None
+    sex: str = "unspecified"
+    height_cm: float | None = None
+    body_mass_kg: float | None = None
+    resting_hr: int | None = None
+    max_hr: int | None = None
+    vo2max_tested: float | None = None
+    current_weekly_km: float | None = None
+    peak_weekly_km_ever: float | None = None
+    longest_recent_run_km: float | None = None
+    runs_per_week: float | None = None
+    years_running: float | None = None
+    strength_days_per_week: float = 0.0
+    primary_surface: str = "road"
+    sleep_hours: float | None = None
+    occupation: str = "sedentary"
+    life_stress: int = 3
+    goal_distance_m: float | None = None
+    goal_date: str | None = None
+    goal_name: str = ""
+    goal_target_time_s: float | None = None
 
 
 class DayRequest(BaseModel):
@@ -186,7 +214,7 @@ def state(athlete: int | None = None, days: int = Query(60, ge=1, le=3650)) -> d
         return {
             "athletes": athletes,
             "athlete_id": athlete_id,
-            "profile": {"name": profile.name},
+            "profile": _profile_json(profile),
             "training_days": [_day_json(d) for d in recent],
             "races": [_race_json(r) for r in profile.races],
             "symptoms": [_symptom_json(s) for s in profile.symptoms
@@ -200,6 +228,30 @@ def state(athlete: int | None = None, days: int = Query(60, ge=1, le=3650)) -> d
             "layoffs": [_layoff_json(l) for l in find_layoffs(profile.training_days)],
             "summary": _summary_json(profile),
         }
+
+
+def _profile_json(p: AthleteProfile) -> dict[str, Any]:
+    phys, train, life, goal = p.physiology, p.training, p.life, p.goal
+    return {
+        "name": p.name,
+        "birth_date": p.birth_date.isoformat() if p.birth_date else None,
+        "sex": p.sex.value, "height_cm": phys.height_cm,
+        "body_mass_kg": phys.body_mass_kg, "resting_hr": phys.resting_hr,
+        "max_hr": phys.max_hr, "vo2max_tested": phys.vo2max_tested,
+        "current_weekly_km": train.current_weekly_km,
+        "peak_weekly_km_ever": train.peak_weekly_km_ever,
+        "longest_recent_run_km": train.longest_recent_run_km,
+        "runs_per_week": train.runs_per_week, "years_running": train.years_running,
+        "strength_days_per_week": train.strength_days_per_week,
+        "primary_surface": train.primary_surface.value,
+        "sleep_hours": life.sleep_hours, "occupation": life.occupation.value,
+        "life_stress": life.life_stress,
+        "goal_distance_m": goal.distance_m if goal else None,
+        "goal_date": goal.race_date.isoformat() if goal and goal.race_date else None,
+        "goal_name": goal.name if goal else "",
+        "goal_target_time_s": goal.target_time_s if goal else None,
+        "age": round(p.age_on(date.today()), 1) if p.birth_date else None,
+    }
 
 
 def _day_json(d: TrainingDay) -> dict[str, Any]:
@@ -296,6 +348,9 @@ def _summary_json(profile: AthleteProfile) -> dict[str, Any]:
         "calibrated": report.calibration.fitted,
         "calibration_note": report.calibration.note,
         "vdot": round(fitness.vdot, 1) if fitness else None,
+        "hr_days_unusable": (coverage.days_with_hr
+                             if not (profile.physiology.resting_hr
+                                     and profile.physiology.max_hr) else 0),
         "symptoms": len(profile.symptoms),
         "flares": sum(1 for s in profile.symptoms if s.is_flare),
         "episodes": len(profile.episodes),
@@ -310,6 +365,57 @@ def create_athlete(req: AthleteRequest) -> dict[str, Any]:
     with db() as database:
         athlete_id = database.save_profile(AthleteProfile(name=req.name.strip()))
         return {"athlete_id": athlete_id}
+
+
+@app.post("/api/profile")
+def save_athlete_profile(req: ProfileRequest) -> dict[str, Any]:
+    """Update the runner's own numbers without disturbing their history.
+
+    save_profile replaces races and the goal wholesale, so this loads the
+    existing profile and edits it rather than building a fresh one -- otherwise
+    saving a resting heart rate would delete every race on file.
+    """
+    with db() as database:
+        athlete_id = _resolve(database, req.athlete_id)
+        profile = database.load_profile(athlete_id)
+        if profile is None:
+            raise HTTPException(status_code=404, detail=f"No athlete {athlete_id}.")
+
+        if req.max_hr and req.resting_hr and req.max_hr <= req.resting_hr:
+            raise HTTPException(
+                status_code=400,
+                detail="Maximum heart rate has to be above resting heart rate.")
+
+        profile.name = req.name.strip() or profile.name
+        profile.birth_date = _date(req.birth_date)
+        profile.sex = _enum(Sex, req.sex, Sex.UNSPECIFIED)
+
+        phys = profile.physiology
+        phys.height_cm, phys.body_mass_kg = req.height_cm, req.body_mass_kg
+        phys.resting_hr, phys.max_hr = req.resting_hr, req.max_hr
+        phys.vo2max_tested = req.vo2max_tested
+
+        train = profile.training
+        train.current_weekly_km = req.current_weekly_km
+        train.peak_weekly_km_ever = req.peak_weekly_km_ever
+        train.longest_recent_run_km = req.longest_recent_run_km
+        train.runs_per_week = req.runs_per_week
+        train.years_running = req.years_running
+        train.strength_days_per_week = req.strength_days_per_week
+        train.primary_surface = _enum(Surface, req.primary_surface, Surface.ROAD)
+
+        profile.life.sleep_hours = req.sleep_hours
+        profile.life.occupation = _enum(Occupation, req.occupation, Occupation.SEDENTARY)
+        profile.life.life_stress = req.life_stress
+
+        goal_date = _date(req.goal_date)
+        profile.goal = (GoalRace(distance_m=req.goal_distance_m, race_date=goal_date,
+                                 name=req.goal_name.strip(),
+                                 target_time_s=req.goal_target_time_s)
+                        if req.goal_distance_m and goal_date else None)
+
+        database.save_profile(profile, athlete_id=athlete_id)
+        return {"athlete_id": athlete_id, "name": profile.name}
 
 
 @app.post("/api/training-day")
