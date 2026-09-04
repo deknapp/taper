@@ -137,10 +137,14 @@ def efforts_from_log(days: list[TrainingDay]) -> list[Effort]:
     for day in days:
         if day.kind == "cross" or day.distance_km <= 0 or not day.duration_s:
             continue
-        # A day holding more than one activity has had its distances and times
-        # added together, so the row describes no single continuous run. Two
-        # easy 5Ks twelve hours apart would otherwise read as a 10K record.
-        if day.sessions > 1:
+        # Two runs on one day were added together, so the row describes no
+        # single continuous run -- two easy 5Ks twelve hours apart would read as
+        # a 10K record. One run is fine however much else was done that day,
+        # provided the time counted is the time spent running.
+        if day.runs > 1:
+            continue
+        time_s = day.run_duration_s or day.duration_s
+        if not time_s:
             continue
         distance_m = day.distance_km * 1000.0
         matched = _match_distance(distance_m)
@@ -148,7 +152,7 @@ def efforts_from_log(days: list[TrainingDay]) -> list[Effort]:
             continue
         label, _ = matched
         efforts.append(screen_terrain(Effort(
-            day=day.day, distance_m=distance_m, time_s=day.duration_s, label=label,
+            day=day.day, distance_m=distance_m, time_s=time_s, label=label,
             name=day.name, source=day.source, surface=day.surface,
             elevation_gain_m=day.elevation_gain_m,
             elevation_loss_m=day.elevation_loss_m)))

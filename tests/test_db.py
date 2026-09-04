@@ -298,7 +298,9 @@ def test_setting_the_same_key_twice_overwrites(db):
 
 def _downgrade(path, version: int) -> None:
     """Strip a file back to an older schema, to test the upgrade path."""
-    dropped = {3: [], 2: ["sessions"], 1: ["sessions", "elevation_loss_m", "name"]}[version]
+    v5 = ["runs", "run_duration_s"]
+    dropped = {4: v5, 3: v5, 2: [*v5, "sessions"],
+               1: [*v5, "sessions", "elevation_loss_m", "name"]}[version]
     conn = sqlite3.connect(path)
     for column in dropped:
         conn.execute(f"ALTER TABLE training_day DROP COLUMN {column}")

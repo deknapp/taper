@@ -24,7 +24,7 @@ from taper.athlete import (
     RaceResult, Sex, Surface, Symptom, Tissue, TrainingBackground, TrainingDay, Wellness,
 )
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DEFAULT_DB_PATH = Path("taper.db")
 
 # Sources that represent things that really happened, as opposed to anything the
@@ -104,6 +104,8 @@ CREATE TABLE training_day (
     name            TEXT    NOT NULL DEFAULT '',
     kind            TEXT    NOT NULL DEFAULT 'easy',
     sessions        INTEGER NOT NULL DEFAULT 1,
+    runs            INTEGER NOT NULL DEFAULT 1,
+    run_duration_s  REAL,
     source          TEXT    NOT NULL DEFAULT 'manual',
     notes           TEXT    NOT NULL DEFAULT '',
     UNIQUE(athlete_id, day)
@@ -272,6 +274,16 @@ class Database:
             with self.conn:
                 self.conn.executescript(_NEW_TABLES)
                 self.conn.execute("PRAGMA user_version = 4")
+
+        # v4 -> v5. Running time as distinct from the whole day's time, so a day
+        # that also held cross-training can still yield an honest pace.
+        if version < 5:
+            with self.conn:
+                self.conn.execute(
+                    "ALTER TABLE training_day ADD COLUMN runs INTEGER NOT NULL DEFAULT 1")
+                self.conn.execute(
+                    "ALTER TABLE training_day ADD COLUMN run_duration_s REAL")
+                self.conn.execute("PRAGMA user_version = 5")
 
     def close(self) -> None:
         self.conn.close()
@@ -453,6 +465,7 @@ class Database:
                 elevation_gain_m=r["elevation_gain_m"],
                 elevation_loss_m=r["elevation_loss_m"], surface=Surface(r["surface"]),
                 name=r["name"], kind=r["kind"], sessions=r["sessions"],
+                runs=r["runs"], run_duration_s=r["run_duration_s"],
                 source=r["source"], notes=r["notes"])
             for r in self.conn.execute(sql, args)]
 
@@ -465,7 +478,7 @@ class Database:
         rows = [
             (athlete_id, _iso(d.day), d.distance_km, d.duration_s, d.avg_hr, d.rpe,
              d.elevation_gain_m, d.elevation_loss_m, d.surface.value, d.name, d.kind,
-             d.sessions, d.source, d.notes)
+             d.sessions, d.runs, d.run_duration_s, d.source, d.notes)
             for d in days]
         if not rows:
             return 0
@@ -473,13 +486,15 @@ class Database:
             conn.executemany(
                 "INSERT INTO training_day (athlete_id, day, distance_km, duration_s, "
                 "avg_hr, rpe, elevation_gain_m, elevation_loss_m, surface, name, kind, "
-                "sessions, source, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "sessions, runs, run_duration_s, source, notes) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(athlete_id, day) DO UPDATE SET "
                 "distance_km=excluded.distance_km, duration_s=excluded.duration_s, "
                 "avg_hr=excluded.avg_hr, rpe=excluded.rpe, "
                 "elevation_gain_m=excluded.elevation_gain_m, "
                 "elevation_loss_m=excluded.elevation_loss_m, surface=excluded.surface, "
                 "name=excluded.name, kind=excluded.kind, sessions=excluded.sessions, "
+                "runs=excluded.runs, run_duration_s=excluded.run_duration_s, "
                 "source=excluded.source, notes=excluded.notes",
                 rows)
         return len(rows)

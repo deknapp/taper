@@ -96,6 +96,11 @@ class TrainingDay:
     name: str = ""
     kind: str = "easy"                    # easy | long | workout | race | cross | off
     sessions: int = 1                     # activities merged into this row
+    runs: int = 1                         # how many of them were runs
+    # Time spent running, as opposed to `duration_s`, which covers everything
+    # done that day. A runner who lifts, climbs or rides on a running day would
+    # otherwise have their pace computed against hours they were not running.
+    run_duration_s: float | None = None
     source: str = "manual"                # 'manual', 'estimated', or an import name
     notes: str = ""
 

@@ -326,3 +326,59 @@ def test_blank_lines_between_rows_are_ignored():
                                  km=10, moving_s=3000)])
     result = parse_activities_csv(text.replace("\n", "\n\n"))
     assert result.rows_seen == 1
+
+
+# -- running time as distinct from the whole day's time --------------------
+
+def test_running_time_is_separated_from_cross_training_time():
+    text = csv_text(HEADER, [
+        row("Aug 15, 2024, 6:00:00 AM", "Run", "Run", km=10, moving_s=2400, activity_id=1),
+        row("Aug 15, 2024, 5:00:00 PM", "Bike", "Ride", km=40, moving_s=3600, activity_id=2),
+    ])
+    day = parse_activities_csv(text).days[0]
+    assert day.duration_s == pytest.approx(6000)      # everything done that day
+    assert day.run_duration_s == pytest.approx(2400)  # the running part of it
+    assert day.runs == 1
+    assert day.sessions == 2
+
+
+def test_a_single_run_day_has_the_same_time_both_ways():
+    text = csv_text(HEADER, [
+        row("Aug 15, 2024, 6:00:00 AM", "Run", "Run", km=10, moving_s=2400)])
+    day = parse_activities_csv(text).days[0]
+    assert day.run_duration_s == day.duration_s == pytest.approx(2400)
+
+
+def test_two_runs_on_a_day_are_counted_as_two_runs():
+    text = csv_text(HEADER, [
+        row("Aug 15, 2024, 6:00:00 AM", "AM", "Run", km=5, moving_s=1200, activity_id=1),
+        row("Aug 15, 2024, 6:00:00 PM", "PM", "Run", km=5, moving_s=1200, activity_id=2),
+    ])
+    day = parse_activities_csv(text).days[0]
+    assert day.runs == 2
+    assert day.run_duration_s == pytest.approx(2400)
+
+
+def test_a_cross_only_day_records_no_running_time():
+    text = csv_text(HEADER, [
+        row("Aug 15, 2024, 6:00:00 AM", "Swim", "Swim", km=2, moving_s=2400)])
+    day = parse_activities_csv(text).days[0]
+    assert day.runs == 0
+    assert day.run_duration_s is None
+
+
+def test_one_run_among_much_cross_training_still_yields_a_record():
+    # The shape a real archive is full of: a 10K, then hours of other sport.
+    text = csv_text(HEADER, [
+        row("Aug 15, 2024, 6:00:00 AM", "Ten", "Run", km=10, moving_s=2400,
+            gain=20, loss=20, activity_id=1),
+        row("Aug 15, 2024, 9:00:00 AM", "Climb", "Rock Climb", km=0, moving_s=7200,
+            activity_id=2),
+        row("Aug 15, 2024, 5:00:00 PM", "Spin", "Ride", km=40, moving_s=3600,
+            activity_id=3),
+    ])
+    from taper.records import detect_records
+    days = parse_activities_csv(text).days
+    records = detect_records(days, [])
+    assert [r.label for r in records] == ["10K"]
+    assert records[0].effort.formatted_time == "40:00"

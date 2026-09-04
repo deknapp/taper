@@ -134,8 +134,13 @@ def day_load(day: TrainingDay, *, vdot: float | None = None,
         return DayLoad(session_rpe(duration_min, day.rpe), "rpe")
 
     if vdot and day.distance_km > 0 and day.duration_s:
+        # Pace has to be measured against the time actually spent running. On a
+        # day that also held a ride or an hour of climbing, dividing the running
+        # distance by the whole day's duration reads as a crawl and understates
+        # the load badly.
+        running_min = (day.run_duration_s or day.duration_s) / 60.0
         return DayLoad(
-            trimp_pace(day.distance_km, duration_min, vdot, gradient_factor), "pace")
+            trimp_pace(day.distance_km, running_min, vdot, gradient_factor), "pace")
 
     if vdot and day.distance_km > 0:
         return DayLoad(

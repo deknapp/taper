@@ -229,6 +229,6 @@ def test_exporting_the_same_profile_twice_gives_the_same_text():
 
 def test_a_merged_day_is_not_exported_as_a_record():
     double = logged(date(2024, 5, 1), 10.0, 2400.0, name="AM / PM")
-    double.sessions = 2
+    double.runs, double.sessions = 2, 2
     text = records_report(profile(training_days=[double]), today=TODAY)
     assert "Nothing yet" in text

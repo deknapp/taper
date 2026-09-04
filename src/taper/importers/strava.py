@@ -297,8 +297,12 @@ def _merge_into_days(activities: list[Activity], result: StravaImport) -> list[T
         runs = [a for a in entries if a.is_run]
         chosen = runs or entries
 
+        def _seconds(activity: Activity) -> float:
+            return activity.moving_time_s or activity.elapsed_time_s or 0.0
+
         distance_m = sum(a.distance_m or 0.0 for a in runs)
-        duration = sum((a.moving_time_s or a.elapsed_time_s or 0.0) for a in entries)
+        duration = sum(_seconds(a) for a in entries)
+        run_duration = sum(_seconds(a) for a in runs)
 
         hr_entries = [(a.avg_hr, (a.moving_time_s or a.elapsed_time_s or 0.0))
                       for a in entries if a.avg_hr]
@@ -322,6 +326,8 @@ def _merge_into_days(activities: list[Activity], result: StravaImport) -> list[T
             surface=chosen[0].surface,
             kind="easy" if runs else "cross",
             sessions=len(entries),
+            runs=len(runs),
+            run_duration_s=run_duration or None,
             source="strava",
             name=" / ".join(names[:3]),
         ))

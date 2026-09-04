@@ -310,27 +310,43 @@ def test_a_day_of_two_runs_is_not_offered_as_one_continuous_effort():
     # Two easy 5Ks twelve hours apart merge to 10 km in 40:00. That is not a
     # 10K, and it must never be presented as one.
     double = logged(date(2024, 8, 1), 10.0, 2400.0, gain=20, loss=20)
-    double.sessions = 2
+    double.runs, double.sessions = 2, 2
     assert efforts_from_log([double]) == []
     assert detect_records([double], []) == []
 
 
 def test_a_single_run_day_is_still_an_effort():
     single = logged(date(2024, 8, 1), 10.0, 2400.0, gain=20, loss=20)
-    assert single.sessions == 1
+    assert single.runs == 1
     assert len(efforts_from_log([single])) == 1
 
 
-def test_a_run_paired_with_cross_training_is_excluded_too():
-    # Distance counts only the run but duration counts the bike as well, so the
-    # implied pace is nonsense.
+def test_one_run_alongside_cross_training_still_counts():
+    # A 10K run and then an hour on the bike. The run was a single continuous
+    # effort and the ride does not stop it being one -- so long as the time
+    # counted is the running time and not the whole day.
     mixed = logged(date(2024, 8, 1), 10.0, 6600.0, gain=20, loss=20)
-    mixed.sessions = 2
+    mixed.sessions, mixed.runs, mixed.run_duration_s = 2, 1, 2400.0
+    efforts = efforts_from_log([mixed])
+    assert len(efforts) == 1
+    assert efforts[0].time_s == 2400.0
+
+
+def test_a_day_with_no_running_time_recorded_is_not_an_effort():
+    mixed = logged(date(2024, 8, 1), 10.0, 0.0)
+    mixed.run_duration_s = None
     assert efforts_from_log([mixed]) == []
+
+
+def test_the_whole_day_time_is_used_when_no_running_time_was_split_out():
+    # Hand-entered days have one activity, so the two are the same thing.
+    single = logged(date(2024, 8, 1), 10.0, 2400.0, gain=20, loss=20)
+    assert single.run_duration_s is None
+    assert efforts_from_log([single])[0].time_s == 2400.0
 
 
 def test_a_merged_day_is_not_reported_as_a_rejected_effort_either():
     # It was not screened out on terrain; it simply is not an effort.
     double = logged(date(2024, 8, 1), 10.0, 2400.0, gain=20, loss=20)
-    double.sessions = 2
+    double.runs, double.sessions = 2, 2
     assert rejected_efforts([double], []) == []
