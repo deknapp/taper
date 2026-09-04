@@ -24,7 +24,7 @@ from taper.athlete import (
     Sex, Surface, Tissue, TrainingBackground, TrainingDay,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_DB_PATH = Path("taper.db")
 
 # Sources that represent things that really happened, as opposed to anything the
@@ -99,7 +99,9 @@ CREATE TABLE training_day (
     avg_hr          INTEGER,
     rpe             REAL,
     elevation_gain_m REAL,
+    elevation_loss_m REAL,
     surface         TEXT    NOT NULL DEFAULT 'road',
+    name            TEXT    NOT NULL DEFAULT '',
     kind            TEXT    NOT NULL DEFAULT 'easy',
     source          TEXT    NOT NULL DEFAULT 'manual',
     notes           TEXT    NOT NULL DEFAULT '',
@@ -181,10 +183,23 @@ class Database:
             with self.conn:
                 self.conn.executescript(_SCHEMA)
                 self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        elif version > SCHEMA_VERSION:
+            return
+        if version > SCHEMA_VERSION:
             raise RuntimeError(
                 f"{self.path} uses schema version {version}; this build understands "
                 f"{SCHEMA_VERSION}. Upgrade taper to open it.")
+
+        # v1 -> v2. Elevation loss and the activity name were on TrainingDay but
+        # had no columns, so both were dropped on write. Elevation loss is not
+        # cosmetic: the record screen needs it to reject net-downhill efforts,
+        # and without it that screen silently passed everything.
+        if version < 2:
+            with self.conn:
+                self.conn.execute(
+                    "ALTER TABLE training_day ADD COLUMN elevation_loss_m REAL")
+                self.conn.execute(
+                    "ALTER TABLE training_day ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+                self.conn.execute("PRAGMA user_version = 2")
 
     def close(self) -> None:
         self.conn.close()
@@ -204,12 +219,13 @@ class Database:
 
     def list_athletes(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
-            "SELECT id, name, updated_at FROM athlete ORDER BY updated_at DESC").fetchall()
+            "SELECT id, name, updated_at FROM athlete "
+            "ORDER BY updated_at DESC, id DESC").fetchall()
         return [dict(r) for r in rows]
 
     def default_athlete_id(self) -> int | None:
         row = self.conn.execute(
-            "SELECT id FROM athlete ORDER BY updated_at DESC LIMIT 1").fetchone()
+            "SELECT id FROM athlete ORDER BY updated_at DESC, id DESC LIMIT 1").fetchone()
         return row["id"] if row else None
 
     def save_profile(self, profile: AthleteProfile, athlete_id: int | None = None) -> int:
@@ -359,8 +375,9 @@ class Database:
             TrainingDay(
                 day=_parse_date(r["day"]), distance_km=r["distance_km"],
                 duration_s=r["duration_s"], avg_hr=r["avg_hr"], rpe=r["rpe"],
-                elevation_gain_m=r["elevation_gain_m"], surface=Surface(r["surface"]),
-                kind=r["kind"], source=r["source"], notes=r["notes"])
+                elevation_gain_m=r["elevation_gain_m"],
+                elevation_loss_m=r["elevation_loss_m"], surface=Surface(r["surface"]),
+                name=r["name"], kind=r["kind"], source=r["source"], notes=r["notes"])
             for r in self.conn.execute(sql, args)]
 
     def upsert_training_days(self, athlete_id: int, days: Iterable[TrainingDay]) -> int:
@@ -371,20 +388,23 @@ class Database:
         """
         rows = [
             (athlete_id, _iso(d.day), d.distance_km, d.duration_s, d.avg_hr, d.rpe,
-             d.elevation_gain_m, d.surface.value, d.kind, d.source, d.notes)
+             d.elevation_gain_m, d.elevation_loss_m, d.surface.value, d.name, d.kind,
+             d.source, d.notes)
             for d in days]
         if not rows:
             return 0
         with self._tx() as conn:
             conn.executemany(
                 "INSERT INTO training_day (athlete_id, day, distance_km, duration_s, "
-                "avg_hr, rpe, elevation_gain_m, surface, kind, source, notes) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+                "avg_hr, rpe, elevation_gain_m, elevation_loss_m, surface, name, kind, "
+                "source, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(athlete_id, day) DO UPDATE SET "
                 "distance_km=excluded.distance_km, duration_s=excluded.duration_s, "
                 "avg_hr=excluded.avg_hr, rpe=excluded.rpe, "
-                "elevation_gain_m=excluded.elevation_gain_m, surface=excluded.surface, "
-                "kind=excluded.kind, source=excluded.source, notes=excluded.notes",
+                "elevation_gain_m=excluded.elevation_gain_m, "
+                "elevation_loss_m=excluded.elevation_loss_m, surface=excluded.surface, "
+                "name=excluded.name, kind=excluded.kind, source=excluded.source, "
+                "notes=excluded.notes",
                 rows)
         return len(rows)
 
