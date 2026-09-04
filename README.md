@@ -37,10 +37,14 @@ pretends the whole thing is settled.
 
 ## Status
 
-Early. The intake layer is done; the simulation engine is next.
+Early. Intake, the training log and the Strava importer are done; the simulation
+engine is next.
 
 ```sh
-uv run taper intake          # fill in the form at localhost:8000
+uv run taper intake                        # who you are, at localhost:8000
+uv run taper log                           # what you did, at localhost:8001
+uv run taper import-strava activities.csv  # a Strava bulk export
+uv run taper export                        # record history as a text file
 uv run taper show profiles/you.json
 ```
 
@@ -56,6 +60,33 @@ No account, no network, nothing leaves the machine.
 - `taper/insights.py` -- what can be derived from a profile without simulating
 - `taper/intake/` -- the local web form and the race-history importer
 - `taper/profile_io.py` -- versioned JSON persistence
+
+### The training log
+
+`taper log` is the daily half: a day's running, a ten-second wellness check-in,
+and any body part that has something to say. It writes straight to `taper.db`.
+
+The symptom check is the point. A log that records only what was run holds the
+injury model's input and none of its outcome; the daily severity rating is the
+label column that makes it a dataset rather than a diary.
+
+- `taper/logapp/` -- the log web app
+- `taper/db.py` -- SQLite storage, real history kept apart from simulator output
+- `taper/records.py` -- personal records, screened on terrain
+- `taper/layoffs.py` -- gaps in the log proposed as candidate injuries
+- `taper/history.py` -- what the model is standing on, and how solid it is
+- `taper/export.py` -- the record history as plain text
+
+### Records, and why one might be missing
+
+A time is comparable to another time only if the ground underneath was. Efforts
+are screened before they count: road or track, no more than 12 m/km of climb, no
+more than 4 m/km of net drop. A rejected effort keeps its reason and is listed
+alongside the records, so a missing personal best is never a mystery.
+
+A day holding more than one activity is never read as a record. Its distances
+and times were added together on import, so two easy 5K shakeouts twelve hours
+apart describe no single continuous run -- and would otherwise appear as a 10K.
 
 ## Importing race history
 
