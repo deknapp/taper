@@ -41,6 +41,7 @@ class Layoff:
     confidence: str              # 'strong' | 'moderate' | 'weak'
     reason: str
     confirmed: bool = False
+    ongoing: bool = False        # the log ends inside this gap; it may not be over
 
     @property
     def weeks(self) -> float:
@@ -90,8 +91,8 @@ def find_layoffs(days: list[TrainingDay], *,
     # --- stoppages: runs of consecutive zero-running days ---
     run_start: date | None = None
     day = first
-    while day <= last + timedelta(days=1):
-        ran = km_by_day.get(day, 0.0) > 0 and day <= last
+    while day <= last:
+        ran = km_by_day.get(day, 0.0) > 0
         if not ran and run_start is None:
             run_start = day
         elif ran and run_start is not None:
@@ -101,6 +102,12 @@ def find_layoffs(days: list[TrainingDay], *,
                 layoffs.append(_build_stoppage(km_by_day, run_start, gap_end, first, last))
             run_start = None
         day += timedelta(days=1)
+
+    # A gap the log ends inside is still a gap, and it is the one that matters
+    # most: the runner is not running now. Reported as ongoing rather than as a
+    # closed episode, because nothing here knows when -- or whether -- it ended.
+    if run_start is not None and (last - run_start).days + 1 >= min_stoppage_days:
+        layoffs.append(_build_stoppage(km_by_day, run_start, last, first, last))
 
     # --- dips: sustained partial reduction, week by week ---
     layoffs.extend(_find_dips(km_by_day, first, last, min_dip_days))
@@ -129,6 +136,7 @@ def _build_stoppage(km_by_day: dict[date, float], start: date, end: date,
                     first: date, last: date) -> Layoff:
     days = (end - start).days + 1
     baseline = _baseline_before(km_by_day, start, first)
+    ongoing = end >= last
 
     # Confidence comes from how out of character the gap is, and from whether
     # there is enough history around it to judge.
@@ -150,9 +158,13 @@ def _build_stoppage(km_by_day: dict[date, float], start: date, end: date,
         reason = (f"{days} days without a run. Short enough to be a planned break "
                   f"or a busy fortnight.")
 
+    if ongoing:
+        reason += (" The log ends here, so this is still open -- at least "
+                   f"{days} days so far, not {days} days in total.")
+
     return Layoff(start=start, end=end, kind="stoppage", days=days,
                   baseline_weekly_km=baseline, during_weekly_km=0.0,
-                  confidence=confidence, reason=reason)
+                  confidence=confidence, reason=reason, ongoing=ongoing)
 
 
 def _find_dips(km_by_day: dict[date, float], first: date, last: date,
