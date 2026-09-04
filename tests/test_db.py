@@ -13,8 +13,8 @@ from datetime import date
 import pytest
 
 from taper.athlete import (
-    AthleteProfile, GoalRace, Injury, LifeLoad, Occupation, Physiology, RaceResult,
-    Sex, Surface, Tissue, TrainingBackground, TrainingDay,
+    AthleteProfile, GoalRace, Injury, InjuryEpisode, LifeLoad, Occupation, Physiology,
+    RaceResult, Sex, Surface, Symptom, Tissue, TrainingBackground, TrainingDay, Wellness,
 )
 from taper.db import SCHEMA_VERSION, Database
 
@@ -297,11 +297,14 @@ def test_setting_the_same_key_twice_overwrites(db):
 # -- migrations ------------------------------------------------------------
 
 def _downgrade(path, version: int) -> None:
-    """Strip a file back to an older training_day shape, to test the upgrade."""
-    dropped = {2: ["sessions"], 1: ["sessions", "elevation_loss_m", "name"]}[version]
+    """Strip a file back to an older schema, to test the upgrade path."""
+    dropped = {3: [], 2: ["sessions"], 1: ["sessions", "elevation_loss_m", "name"]}[version]
     conn = sqlite3.connect(path)
     for column in dropped:
         conn.execute(f"ALTER TABLE training_day DROP COLUMN {column}")
+    if version < 4:
+        for table in ("symptom", "episode", "wellness"):
+            conn.execute(f"DROP TABLE {table}")
     conn.execute(f"PRAGMA user_version = {version}")
     conn.commit()
     conn.close()
@@ -369,7 +372,7 @@ def test_a_v2_file_gains_the_session_count_on_open(tmp_path):
     _downgrade(path, 2)
 
     with Database(path) as upgraded:
-        assert upgraded.conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert upgraded.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         day = upgraded.training_days(athlete_id)[0]
         # Days logged before the column existed are assumed to be single runs,
         # which is what a hand-entered day almost always is.
@@ -384,3 +387,220 @@ def test_the_session_count_survives_a_round_trip(tmp_path):
                              duration_s=2400.0, sessions=2)
         database.upsert_training_days(athlete_id, [double])
         assert database.training_days(athlete_id)[0].sessions == 2
+
+
+# -- symptoms --------------------------------------------------------------
+
+def symptom(day=date(2024, 8, 15), part="left achilles", severity=5.0) -> Symptom:
+    return Symptom(day=day, body_part=part, severity=severity, tissue=Tissue.TENDON,
+                   affected_running=True, notes="tight on the first mile")
+
+
+def test_a_symptom_survives_a_round_trip(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.upsert_symptoms(athlete_id, [symptom()])
+    assert db.symptoms(athlete_id)[0] == symptom()
+
+
+def test_one_day_can_carry_several_body_parts(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.upsert_symptoms(athlete_id, [
+        symptom(part="left achilles"), symptom(part="right knee", severity=2.0)])
+    assert len(db.symptoms(athlete_id)) == 2
+
+
+def test_revisiting_a_day_corrects_the_rating_rather_than_duplicating_it(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.upsert_symptoms(athlete_id, [symptom(severity=5.0)])
+    db.upsert_symptoms(athlete_id, [symptom(severity=2.0)])
+
+    rows = db.symptoms(athlete_id)
+    assert len(rows) == 1
+    assert rows[0].severity == pytest.approx(2.0)
+
+
+def test_symptoms_can_be_windowed_by_date(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.upsert_symptoms(athlete_id,
+                       [symptom(day=date(2024, 8, n)) for n in range(1, 11)])
+    assert len(db.symptoms(athlete_id, since=date(2024, 8, 5))) == 6
+    assert len(db.symptoms(athlete_id, until=date(2024, 8, 5))) == 5
+
+
+def test_a_symptom_can_be_taken_back(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.upsert_symptoms(athlete_id, [symptom()])
+    assert db.delete_symptom(athlete_id, date(2024, 8, 15), "left achilles") == 1
+    assert db.symptoms(athlete_id) == []
+
+
+def test_the_flare_threshold_survives_storage(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.upsert_symptoms(athlete_id, [
+        Symptom(day=date(2024, 8, 1), body_part="knee", severity=1.0),
+        symptom(day=date(2024, 8, 2)),
+    ])
+    stored = db.symptoms(athlete_id)
+    assert [s.is_flare for s in stored] == [False, True]
+
+
+def test_symptoms_are_not_shared_between_athletes(db):
+    a = db.save_profile(AthleteProfile(name="A"))
+    b = db.save_profile(AthleteProfile(name="B"))
+    db.upsert_symptoms(a, [symptom()])
+    assert db.symptoms(b) == []
+
+
+# -- episodes --------------------------------------------------------------
+
+def episode(onset=date(2024, 3, 1), resolved=date(2024, 4, 15)) -> InjuryEpisode:
+    return InjuryEpisode(body_part="left achilles", tissue=Tissue.TENDON,
+                         onset_date=onset, resolved_date=resolved,
+                         peak_severity=7.0, days_lost=32, notes="hill block")
+
+
+def test_an_episode_survives_a_round_trip(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.replace_episodes(athlete_id, [episode()])
+    assert db.episodes(athlete_id)[0] == episode()
+
+
+def test_the_same_body_part_can_flare_more_than_once(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.replace_episodes(athlete_id, [
+        episode(onset=date(2023, 3, 1), resolved=date(2023, 4, 1)),
+        episode(onset=date(2024, 3, 1), resolved=date(2024, 4, 1)),
+    ])
+    assert len(db.episodes(athlete_id)) == 2
+
+
+def test_replacing_episodes_does_not_accumulate_them(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.replace_episodes(athlete_id, [episode()])
+    db.replace_episodes(athlete_id, [episode()])
+    assert len(db.episodes(athlete_id)) == 1
+
+
+def test_replacing_with_an_empty_list_clears_them(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.replace_episodes(athlete_id, [episode()])
+    assert db.replace_episodes(athlete_id, []) == 0
+    assert db.episodes(athlete_id) == []
+
+
+def test_an_unresolved_episode_comes_back_open(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.replace_episodes(athlete_id, [episode(resolved=None)])
+    stored = db.episodes(athlete_id)[0]
+    assert stored.resolved_date is None
+    assert stored.is_open(date(2024, 9, 1))
+
+
+def test_open_episodes_are_the_ones_still_being_lived_in(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.replace_episodes(athlete_id, [
+        episode(onset=date(2023, 1, 1), resolved=date(2023, 2, 1)),
+        episode(onset=date(2024, 6, 1), resolved=None),
+    ])
+    open_ones = db.open_episodes(athlete_id, on=date(2024, 9, 1))
+    assert [e.onset_date for e in open_ones] == [date(2024, 6, 1)]
+
+
+def test_episodes_come_back_oldest_first(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.replace_episodes(athlete_id, [
+        episode(onset=date(2024, 3, 1)), episode(onset=date(2022, 3, 1)),
+        episode(onset=date(2023, 3, 1))])
+    onsets = [e.onset_date for e in db.episodes(athlete_id)]
+    assert onsets == sorted(onsets)
+
+
+# -- wellness --------------------------------------------------------------
+
+def wellness_entry(day=date(2024, 8, 15)) -> Wellness:
+    return Wellness(day=day, sleep_hours=7.25, sleep_quality=4, soreness=2, stress=3,
+                    motivation=5, resting_hr=47, body_mass_kg=71.4, notes="good day")
+
+
+def test_a_wellness_entry_survives_a_round_trip(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.upsert_wellness(athlete_id, [wellness_entry()])
+    assert db.wellness(athlete_id)[0] == wellness_entry()
+
+
+def test_one_wellness_entry_per_day(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.upsert_wellness(athlete_id, [wellness_entry()])
+    revised = wellness_entry()
+    revised.sleep_hours = 5.0
+    db.upsert_wellness(athlete_id, [revised])
+
+    rows = db.wellness(athlete_id)
+    assert len(rows) == 1
+    assert rows[0].sleep_hours == pytest.approx(5.0)
+
+
+def test_a_wellness_entry_can_be_mostly_blank(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.upsert_wellness(athlete_id, [Wellness(day=date(2024, 8, 15), sleep_hours=6.0)])
+    stored = db.wellness(athlete_id)[0]
+    assert stored.sleep_hours == pytest.approx(6.0)
+    assert stored.resting_hr is None
+
+
+def test_wellness_can_be_windowed_by_date(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.upsert_wellness(athlete_id,
+                       [wellness_entry(day=date(2024, 8, n)) for n in range(1, 11)])
+    assert len(db.wellness(athlete_id, since=date(2024, 8, 8))) == 3
+
+
+# -- the whole profile -----------------------------------------------------
+
+def test_loading_a_profile_brings_symptoms_episodes_and_wellness_with_it(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.upsert_symptoms(athlete_id, [symptom()])
+    db.replace_episodes(athlete_id, [episode()])
+    db.upsert_wellness(athlete_id, [wellness_entry()])
+
+    loaded = db.load_profile(athlete_id)
+    assert loaded.symptoms == [symptom()]
+    assert loaded.episodes == [episode()]
+    assert loaded.wellness == [wellness_entry()]
+
+
+def test_saving_the_intake_form_does_not_wipe_the_daily_check_ins(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.upsert_symptoms(athlete_id, [symptom()])
+    db.upsert_wellness(athlete_id, [wellness_entry()])
+    db.save_profile(AthleteProfile(name="Edited"), athlete_id=athlete_id)
+
+    assert db.symptoms(athlete_id) == [symptom()]
+    assert db.wellness(athlete_id) == [wellness_entry()]
+
+
+def test_deleting_an_athlete_removes_their_symptoms_and_episodes(db):
+    athlete_id = db.save_profile(AthleteProfile())
+    db.upsert_symptoms(athlete_id, [symptom()])
+    db.replace_episodes(athlete_id, [episode()])
+    db.upsert_wellness(athlete_id, [wellness_entry()])
+    db.delete_athlete(athlete_id)
+
+    for table in ("symptom", "episode", "wellness"):
+        assert db.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+
+
+def test_a_v3_file_gains_the_check_in_tables_on_open(tmp_path):
+    path = tmp_path / "v3.db"
+    with Database(path) as database:
+        athlete_id = database.save_profile(AthleteProfile(name="Old"))
+        database.upsert_training_days(
+            athlete_id, [TrainingDay(day=date(2024, 8, 1), distance_km=10.0)])
+    _downgrade(path, 3)
+
+    with Database(path) as upgraded:
+        assert upgraded.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert upgraded.symptoms(athlete_id) == []
+        upgraded.upsert_symptoms(athlete_id, [symptom()])
+        assert upgraded.symptoms(athlete_id) == [symptom()]
+        assert len(upgraded.training_days(athlete_id)) == 1

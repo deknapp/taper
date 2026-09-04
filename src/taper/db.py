@@ -20,11 +20,11 @@ from pathlib import Path
 from typing import Any
 
 from taper.athlete import (
-    AthleteProfile, GoalRace, Injury, LifeLoad, Occupation, Physiology, RaceResult,
-    Sex, Surface, Tissue, TrainingBackground, TrainingDay,
+    AthleteProfile, GoalRace, Injury, InjuryEpisode, LifeLoad, Occupation, Physiology,
+    RaceResult, Sex, Surface, Symptom, Tissue, TrainingBackground, TrainingDay, Wellness,
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DEFAULT_DB_PATH = Path("taper.db")
 
 # Sources that represent things that really happened, as opposed to anything the
@@ -32,7 +32,7 @@ DEFAULT_DB_PATH = Path("taper.db")
 # engine.
 REAL_SOURCES = ("manual", "paste", "csv", "import", "estimated")
 
-_SCHEMA = """
+_CORE_SCHEMA = """
 CREATE TABLE athlete (
     id                  INTEGER PRIMARY KEY,
     name                TEXT    NOT NULL DEFAULT '',
@@ -146,6 +146,60 @@ CREATE TABLE sim_day (
 );
 CREATE INDEX sim_day_run ON sim_day(sim_run_id, day);
 
+"""
+
+_NEW_TABLES = """
+-- The label column. A log that records only what was run holds the injury
+-- model's input and none of its outcome; this is the outcome. One row per body
+-- part per day, so a day can carry several complaints at once.
+CREATE TABLE symptom (
+    id          INTEGER PRIMARY KEY,
+    athlete_id  INTEGER NOT NULL REFERENCES athlete(id) ON DELETE CASCADE,
+    day         TEXT    NOT NULL,
+    body_part   TEXT    NOT NULL,
+    severity    REAL    NOT NULL,
+    tissue      TEXT    NOT NULL DEFAULT 'other',
+    affected_running INTEGER NOT NULL DEFAULT 0,
+    notes       TEXT    NOT NULL DEFAULT '',
+    UNIQUE(athlete_id, day, body_part)
+);
+CREATE INDEX symptom_athlete_day ON symptom(athlete_id, day);
+
+-- A dated flare-up, onset to resolution. Episodes are what the injury model is
+-- fitted against; an unresolved one is an injury the runner is still in.
+CREATE TABLE episode (
+    id            INTEGER PRIMARY KEY,
+    athlete_id    INTEGER NOT NULL REFERENCES athlete(id) ON DELETE CASCADE,
+    body_part     TEXT    NOT NULL,
+    tissue        TEXT    NOT NULL DEFAULT 'other',
+    onset_date    TEXT    NOT NULL,
+    resolved_date TEXT,
+    peak_severity REAL,
+    days_lost     INTEGER NOT NULL DEFAULT 0,
+    notes         TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX episode_athlete ON episode(athlete_id, onset_date);
+
+-- The recovery side of the ledger: cheap to give daily, and both sleep and
+-- stress have real associations with injury and with blunted training response.
+CREATE TABLE wellness (
+    id            INTEGER PRIMARY KEY,
+    athlete_id    INTEGER NOT NULL REFERENCES athlete(id) ON DELETE CASCADE,
+    day           TEXT    NOT NULL,
+    sleep_hours   REAL,
+    sleep_quality INTEGER,
+    soreness      INTEGER,
+    stress        INTEGER,
+    motivation    INTEGER,
+    resting_hr    INTEGER,
+    body_mass_kg  REAL,
+    notes         TEXT    NOT NULL DEFAULT '',
+    UNIQUE(athlete_id, day)
+);
+CREATE INDEX wellness_athlete_day ON wellness(athlete_id, day);
+"""
+
+_SCHEMA = _CORE_SCHEMA + _NEW_TABLES + """
 CREATE TABLE setting (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -210,6 +264,14 @@ class Database:
                     "ALTER TABLE training_day ADD COLUMN sessions INTEGER NOT NULL "
                     "DEFAULT 1")
                 self.conn.execute("PRAGMA user_version = 3")
+
+        # v3 -> v4. Symptoms, episodes and wellness. The dataclasses existed
+        # from the start but had nowhere to live, so the daily check-in had
+        # nothing to write to.
+        if version < 4:
+            with self.conn:
+                self.conn.executescript(_NEW_TABLES)
+                self.conn.execute("PRAGMA user_version = 4")
 
     def close(self) -> None:
         self.conn.close()
@@ -351,6 +413,9 @@ class Database:
                 (athlete_id,))]
 
         profile.training_days = self.training_days(athlete_id)
+        profile.symptoms = self.symptoms(athlete_id)
+        profile.episodes = self.episodes(athlete_id)
+        profile.wellness = self.wellness(athlete_id)
 
         goal_row = self.conn.execute(
             "SELECT * FROM goal WHERE athlete_id = ? AND is_active = 1 "
@@ -431,6 +496,128 @@ class Database:
             args.append(until.isoformat())
         with self._tx() as conn:
             return conn.execute(sql, args).rowcount
+
+
+    # -- symptoms: the outcome column the injury model is fitted against ----
+
+    def symptoms(self, athlete_id: int, since: date | None = None,
+                 until: date | None = None) -> list[Symptom]:
+        sql = "SELECT * FROM symptom WHERE athlete_id = ?"
+        args: list[Any] = [athlete_id]
+        if since:
+            sql += " AND day >= ?"
+            args.append(since.isoformat())
+        if until:
+            sql += " AND day <= ?"
+            args.append(until.isoformat())
+        sql += " ORDER BY day, body_part"
+        return [
+            Symptom(day=_parse_date(r["day"]), body_part=r["body_part"],
+                    severity=r["severity"], tissue=Tissue(r["tissue"]),
+                    affected_running=bool(r["affected_running"]), notes=r["notes"])
+            for r in self.conn.execute(sql, args)]
+
+    def upsert_symptoms(self, athlete_id: int, symptoms: Iterable[Symptom]) -> int:
+        """Add or correct symptom rows, keyed on the day and the body part.
+
+        Upsert rather than insert so that revisiting a day to change a rating
+        corrects it instead of recording the same knee twice.
+        """
+        rows = [(athlete_id, _iso(s.day), s.body_part, s.severity, s.tissue.value,
+                 int(s.affected_running), s.notes) for s in symptoms]
+        if not rows:
+            return 0
+        with self._tx() as conn:
+            conn.executemany(
+                "INSERT INTO symptom (athlete_id, day, body_part, severity, tissue, "
+                "affected_running, notes) VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(athlete_id, day, body_part) DO UPDATE SET "
+                "severity=excluded.severity, tissue=excluded.tissue, "
+                "affected_running=excluded.affected_running, notes=excluded.notes",
+                rows)
+        return len(rows)
+
+    def delete_symptom(self, athlete_id: int, day: date, body_part: str) -> int:
+        with self._tx() as conn:
+            return conn.execute(
+                "DELETE FROM symptom WHERE athlete_id = ? AND day = ? AND body_part = ?",
+                (athlete_id, _iso(day), body_part)).rowcount
+
+    # -- injury episodes ---------------------------------------------------
+
+    def episodes(self, athlete_id: int) -> list[InjuryEpisode]:
+        return [
+            InjuryEpisode(
+                body_part=r["body_part"], tissue=Tissue(r["tissue"]),
+                onset_date=_parse_date(r["onset_date"]),
+                resolved_date=_parse_date(r["resolved_date"]),
+                peak_severity=r["peak_severity"], days_lost=r["days_lost"],
+                notes=r["notes"])
+            for r in self.conn.execute(
+                "SELECT * FROM episode WHERE athlete_id = ? ORDER BY onset_date",
+                (athlete_id,))]
+
+    def replace_episodes(self, athlete_id: int,
+                         episodes: Iterable[InjuryEpisode]) -> int:
+        """Replace the episode list wholesale, the way the form owns it.
+
+        Episodes have no natural key -- the same body part can flare twice --
+        so the editor sends the whole list rather than patching rows by id.
+        """
+        rows = [(athlete_id, e.body_part, e.tissue.value, _iso(e.onset_date),
+                 _iso(e.resolved_date), e.peak_severity, e.days_lost, e.notes)
+                for e in episodes]
+        with self._tx() as conn:
+            conn.execute("DELETE FROM episode WHERE athlete_id = ?", (athlete_id,))
+            conn.executemany(
+                "INSERT INTO episode (athlete_id, body_part, tissue, onset_date, "
+                "resolved_date, peak_severity, days_lost, notes) VALUES (?,?,?,?,?,?,?,?)",
+                rows)
+        return len(rows)
+
+    def open_episodes(self, athlete_id: int, on: date | None = None) -> list[InjuryEpisode]:
+        """Episodes the runner has not come out of yet."""
+        return [e for e in self.episodes(athlete_id) if e.is_open(on)]
+
+    # -- wellness ----------------------------------------------------------
+
+    def wellness(self, athlete_id: int, since: date | None = None,
+                 until: date | None = None) -> list[Wellness]:
+        sql = "SELECT * FROM wellness WHERE athlete_id = ?"
+        args: list[Any] = [athlete_id]
+        if since:
+            sql += " AND day >= ?"
+            args.append(since.isoformat())
+        if until:
+            sql += " AND day <= ?"
+            args.append(until.isoformat())
+        sql += " ORDER BY day"
+        return [
+            Wellness(day=_parse_date(r["day"]), sleep_hours=r["sleep_hours"],
+                     sleep_quality=r["sleep_quality"], soreness=r["soreness"],
+                     stress=r["stress"], motivation=r["motivation"],
+                     resting_hr=r["resting_hr"], body_mass_kg=r["body_mass_kg"],
+                     notes=r["notes"])
+            for r in self.conn.execute(sql, args)]
+
+    def upsert_wellness(self, athlete_id: int, entries: Iterable[Wellness]) -> int:
+        rows = [(athlete_id, _iso(w.day), w.sleep_hours, w.sleep_quality, w.soreness,
+                 w.stress, w.motivation, w.resting_hr, w.body_mass_kg, w.notes)
+                for w in entries]
+        if not rows:
+            return 0
+        with self._tx() as conn:
+            conn.executemany(
+                "INSERT INTO wellness (athlete_id, day, sleep_hours, sleep_quality, "
+                "soreness, stress, motivation, resting_hr, body_mass_kg, notes) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(athlete_id, day) DO UPDATE SET "
+                "sleep_hours=excluded.sleep_hours, sleep_quality=excluded.sleep_quality, "
+                "soreness=excluded.soreness, stress=excluded.stress, "
+                "motivation=excluded.motivation, resting_hr=excluded.resting_hr, "
+                "body_mass_kg=excluded.body_mass_kg, notes=excluded.notes",
+                rows)
+        return len(rows)
 
     # -- settings ----------------------------------------------------------
 
