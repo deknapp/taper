@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>taper — training log</title>
+<style>
+  :root {
+    --bg: #12140f; --panel: #1a1d16; --line: #2c3126; --ink: #e8eadf;
+    --muted: #9aa38c; --accent: #a3c057; --warn: #e0a33e; --alert: #e06c4f;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif; }
+  header { padding: 20px 28px 0; border-bottom: 1px solid var(--line); }
+  .top { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 21px; letter-spacing: -0.01em; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  .sub { color: var(--muted); font-size: 13.5px; margin: 5px 0 0; max-width: 68ch; }
+  .who { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .who select { width: auto; min-width: 150px; }
+  nav { display: flex; gap: 2px; margin-top: 16px; flex-wrap: wrap; }
+  nav button { background: none; border: 0; border-bottom: 2px solid transparent;
+    color: var(--muted); padding: 9px 14px; font: inherit; font-size: 13.5px;
+    cursor: pointer; border-radius: 0; font-weight: 500; }
+  nav button:hover { color: var(--ink); }
+  nav button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+  main { padding: 22px 28px 90px; }
+  .wrap { display: grid; grid-template-columns: minmax(0,1.6fr) minmax(0,1fr);
+    gap: 24px; align-items: start; }
+  @media (max-width: 1000px) { .wrap { grid-template-columns: 1fr; } }
+  fieldset { border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--panel); padding: 16px 18px 18px; margin: 0 0 16px; }
+  legend { padding: 0 8px; font-weight: 600; font-size: 13px; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--accent); }
+  .hint { color: var(--muted); font-size: 12.5px; margin: -2px 0 14px; max-width: 72ch; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .grid.tight { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+  input, select, textarea { width: 100%; background: #0e100b; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px;
+    font: inherit; font-size: 14px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent);
+    outline-offset: -1px; border-color: transparent; }
+  textarea { min-height: 60px; resize: vertical; font-size: 13px; }
+  button { background: var(--accent); color: #12140f; border: 0; border-radius: 6px;
+    padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  button.ghost:hover:not(:disabled) { color: var(--ink); border-color: var(--muted); }
+  button.link { background: none; border: 0; color: var(--muted); padding: 2px 6px;
+    cursor: pointer; font-size: 16px; line-height: 1; }
+  button.link:hover { color: var(--alert); }
+  a.download { display: inline-block; background: var(--accent); color: #12140f;
+    text-decoration: none; border-radius: 6px; padding: 8px 14px; font-weight: 600;
+    font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--muted); font-weight: 600; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+  td { padding: 4px 6px; border-bottom: 1px solid #23271d; vertical-align: middle; }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; }
+  td input, td select { padding: 5px 7px; font-size: 13px; }
+  tr.clickable:hover td { background: #20241a; cursor: pointer; }
+  .rail { position: sticky; top: 18px; }
+  .stat { font-size: 34px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; }
+  .stat small { font-size: 13px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+  .kv { display: flex; justify-content: space-between; padding: 5px 0;
+    border-bottom: 1px solid #23271d; font-size: 13.5px; }
+  .kv span { color: var(--muted); } .kv b { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .badge { display: inline-block; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .06em; padding: 2px 7px; border-radius: 99px; border: 1px solid var(--line);
+    color: var(--muted); }
+  .badge.ok { color: var(--accent); border-color: #3f5426; }
+  .badge.warn { color: var(--warn); border-color: #5a4520; }
+  .badge.alert { color: var(--alert); border-color: #6b3226; }
+  .flag { display: flex; gap: 9px; padding: 9px 0; border-bottom: 1px solid #23271d;
+    font-size: 13px; color: #cdd3c0; }
+  .flag i { flex: none; width: 7px; height: 7px; border-radius: 99px; margin-top: 6px;
+    background: var(--warn); }
+  .msg { font-size: 12.5px; color: var(--muted); margin-top: 10px; min-height: 1.4em; }
+  .msg.ok { color: var(--accent); } .msg.bad { color: var(--alert); }
+  .row { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+  .row.end { justify-content: flex-end; }
+  .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+  .sev { display: flex; gap: 3px; }
+  .sev button { flex: 1; padding: 6px 0; font-size: 12.5px; background: #0e100b;
+    color: var(--muted); border: 1px solid var(--line); font-weight: 500; }
+  .sev button[aria-pressed="true"] { background: var(--accent); color: #12140f; font-weight: 700; }
+  .sev button.hot[aria-pressed="true"] { background: var(--alert); color: #fff; }
+  .chain { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .pre { font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap;
+    background: #0e100b; border: 1px solid var(--line); border-radius: 6px; padding: 12px;
+    max-height: 460px; overflow: auto; color: #cdd3c0; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <h1>taper <span>— training log</span></h1>
+    <div class="who">
+      <select id="athlete" aria-label="Athlete"></select>
+      <button class="ghost" id="newAthlete">New</button>
+    </div>
+  </div>
+  <p class="sub">What you did, and how your body felt about it. Everything here is
+    written straight to <code>taper.db</code> on this machine.</p>
+  <nav id="tabs">
+    <button data-tab="day" aria-selected="true">Today</button>
+    <button data-tab="log">Training log</button>
+    <button data-tab="races">Races &amp; PRs</button>
+    <button data-tab="body">Body</button>
+    <button data-tab="records">Records</button>
+    <button data-tab="backup">Backup</button>
+  </nav>
+</header>
+
+<main>
+<div id="noAthlete" class="hidden">
+  <fieldset><legend>Start here</legend>
+    <p class="hint">Nothing is logged against nobody. Name the runner and the log begins.</p>
+    <div class="row">
+      <input id="firstName" placeholder="Your name" style="max-width:280px">
+      <button id="createFirst">Create</button>
+    </div>
+  </fieldset>
+</div>
+
+<div id="app" class="wrap hidden">
+<div class="col">
+
+  <!-- ============ TODAY ============ -->
+  <section data-panel="day">
+    <fieldset><legend>Log a day</legend>
+      <p class="hint">One row per day. Saving a day you already logged corrects it
+        rather than adding a second one. Distance and time are enough; heart rate or
+        an effort rating make the load estimate a measurement instead of a guess.</p>
+      <div class="grid">
+        <div><label for="d_day">Date</label><input type="date" id="d_day"></div>
+        <div><label for="d_kind">Kind</label><select id="d_kind">
+          <option value="easy">Easy</option><option value="long">Long</option>
+          <option value="workout">Workout</option><option value="race">Race</option>
+          <option value="cross">Cross-training</option><option value="off">Rest</option>
+        </select></div>
+        <div><label for="d_distance">Distance (km)</label>
+          <input type="number" id="d_distance" step="0.01" min="0" placeholder="0"></div>
+        <div><label for="d_duration">Time (h:mm:ss)</label>
+          <input id="d_duration" placeholder="48:20"></div>
+        <div><label for="d_surface">Surface</label><select id="d_surface">
+          <option value="road">Road</option><option value="trail">Trail</option>
+          <option value="track">Track</option><option value="treadmill">Treadmill</option>
+          <option value="grass">Grass</option>
+        </select></div>
+        <div><label for="d_hr">Avg HR</label>
+          <input type="number" id="d_hr" min="60" max="230" placeholder="—"></div>
+        <div><label for="d_rpe">RPE (1–10)</label>
+          <input type="number" id="d_rpe" min="1" max="10" step="0.5" placeholder="—"></div>
+        <div><label for="d_gain">Climb (m)</label>
+          <input type="number" id="d_gain" step="1" placeholder="—"></div>
+        <div><label for="d_loss">Descent (m)</label>
+          <input type="number" id="d_loss" step="1" placeholder="—"></div>
+      </div>
+      <div class="grid" style="margin-top:12px">
+        <div style="grid-column:1/-1"><label for="d_name">What was it?</label>
+          <input id="d_name" placeholder="Bosque loop, 6x800m, easy shakeout…"></div>
+      </div>
+      <div style="margin-top:12px"><label for="d_notes">Notes</label>
+        <textarea id="d_notes" placeholder="How it went. Weather, legs, anything you'd want to know later."></textarea></div>
+      <div class="row" style="margin-top:12px">
+        <button id="saveDay">Save day</button>
+        <button class="ghost" id="restDay">Log a rest day</button>
+      </div>
+      <div class="msg" id="dayMsg"></div>
+    </fieldset>
+
+    <fieldset><legend>How you feel today</legend>
+      <p class="hint">Ten seconds. This is the column that makes the log a dataset
+        rather than a diary: without it the injury model has its input and none of
+        its outcome.</p>
+      <div class="grid tight">
+        <div><label for="w_sleep">Sleep (h)</label>
+          <input type="number" id="w_sleep" step="0.25" min="0" max="16" placeholder="—"></div>
+        <div><label for="w_quality">Sleep quality</label>
+          <input type="number" id="w_quality" min="1" max="5" placeholder="1–5"></div>
+        <div><label for="w_soreness">Soreness</label>
+          <input type="number" id="w_soreness" min="1" max="5" placeholder="1–5"></div>
+        <div><label for="w_stress">Stress</label>
+          <input type="number" id="w_stress" min="1" max="5" placeholder="1–5"></div>
+        <div><label for="w_motivation">Motivation</label>
+          <input type="number" id="w_motivation" min="1" max="5" placeholder="1–5"></div>
+        <div><label for="w_rhr">Resting HR</label>
+          <input type="number" id="w_rhr" min="25" max="120" placeholder="—"></div>
+        <div><label for="w_mass">Body mass (kg)</label>
+          <input type="number" id="w_mass" step="0.1" placeholder="—"></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="saveWellness">Save check-in</button>
+      </div>
+      <div class="msg" id="wellnessMsg"></div>
+    </fieldset>
+
+    <fieldset><legend>Anything hurt?</legend>
+      <p class="hint">Add a body part only when it has something to say. 0 is fine,
+        10 is cannot run. Four or more, or anything that changed your run, counts as
+        a flare — that is the event the model is trying to see coming.</p>
+      <div class="grid">
+        <div><label for="s_part">Body part</label>
+          <input id="s_part" list="parts" placeholder="left achilles">
+          <datalist id="parts">
+            <option>left achilles</option><option>right achilles</option>
+            <option>left knee</option><option>right knee</option>
+            <option>left shin</option><option>right shin</option>
+            <option>left calf</option><option>right calf</option>
+            <option>left hamstring</option><option>right hamstring</option>
+            <option>left hip</option><option>right hip</option>
+            <option>left foot</option><option>right foot</option>
+            <option>lower back</option><option>left IT band</option><option>right IT band</option>
+            <option>left plantar fascia</option><option>right plantar fascia</option>
+          </datalist></div>
+        <div><label for="s_tissue">Tissue</label><select id="s_tissue">
+          <option value="other">Not sure</option><option value="tendon">Tendon</option>
+          <option value="bone">Bone</option><option value="muscle">Muscle</option>
+          <option value="joint">Joint</option><option value="fascia">Fascia</option>
+        </select></div>
+      </div>
+      <div style="margin-top:12px">
+        <label>Severity</label>
+        <div class="sev" id="sevPicker"></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label style="margin:0"><input type="checkbox" id="s_affected" style="width:auto">
+          It changed what I ran</label>
+      </div>
+      <div style="margin-top:10px"><label for="s_notes">Notes</label>
+        <textarea id="s_notes" placeholder="When in the run, what it felt like, what helped."></textarea></div>
+      <div class="row" style="margin-top:12px"><button id="saveSymptom">Record it</button></div>
+      <div class="msg" id="symptomMsg"></div>
+      <div id="todaySymptoms"></div>
+    </fieldset>
+  </section>
+
+  <!-- ============ TRAINING LOG ============ -->
+  <section data-panel="log" class="hidden">
+    <fieldset><legend>Recent training</legend>
+      <p class="hint">Click any row to load it back into the Today tab and edit it.
+        A day showing more than one session was merged from several activities on
+        import, so it is never read as a single continuous run.</p>
+      <div class="row" style="margin-bottom:10px">
+        <label style="margin:0">Show</label>
+        <select id="logWindow" style="width:auto">
+          <option value="30">last 30 days</option>
+          <option value="60" selected>last 60 days</option>
+          <option value="180">last 6 months</option>
+          <option value="365">last year</option>
+          <option value="3650">everything</option>
+        </select>
+      </div>
+      <div id="logTable"></div>
+    </fieldset>
+  </section>
+
+  <!-- ============ RACES ============ -->
+  <section data-panel="races" class="hidden">
+    <fieldset><legend>Races and personal bests</legend>
+      <p class="hint">Every race you can remember. Times here feed the fitness
+        estimate and the record list, so an approximate date is better than none.
+        Enter times as h:mm:ss or mm:ss.</p>
+      <div id="raceTable"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="ghost" id="addRace">Add a race</button>
+        <button id="saveRaces">Save races</button>
+      </div>
+      <div class="msg" id="raceMsg"></div>
+    </fieldset>
+  </section>
+
+  <!-- ============ BODY ============ -->
+  <section data-panel="body" class="hidden">
+    <fieldset><legend>Injury episodes</legend>
+      <p class="hint">A dated flare-up, onset to resolution. Leave the resolved date
+        empty while you are still in it. These are what the injury model is fitted
+        against, so an approximate onset beats leaving it out.</p>
+      <div id="episodeTable"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="ghost" id="addEpisode">Add an episode</button>
+        <button id="saveEpisodes">Save episodes</button>
+      </div>
+      <div class="msg" id="episodeMsg"></div>
+    </fieldset>
+
+    <fieldset><legend>Gaps the log noticed</legend>
+      <p class="hint">Stretches where running stopped or dropped sharply. These are
+        candidates, not conclusions — a three-week hole is equally consistent with a
+        torn calf, a work trip or a heatwave. Promote the ones that were injuries.</p>
+      <div id="layoffList"></div>
+    </fieldset>
+
+    <fieldset><legend>Symptom history</legend>
+      <div id="symptomHistory"></div>
+    </fieldset>
+  </section>
+
+  <!-- ============ RECORDS ============ -->
+  <section data-panel="records" class="hidden">
+    <fieldset><legend>Personal records</legend>
+      <p class="hint">Best eligible effort at each standard distance, from races and
+        from training days whose whole distance lands on one.</p>
+      <div id="recordTable"></div>
+    </fieldset>
+    <fieldset><legend>Excluded by the terrain screen</legend>
+      <p class="hint">Fast, real, and not comparable to a flat road time. Shown so a
+        missing best is never a mystery.</p>
+      <div id="rejectedTable"></div>
+    </fieldset>
+  </section>
+
+  <!-- ============ BACKUP ============ -->
+  <section data-panel="backup" class="hidden">
+    <fieldset><legend>Export your record history</legend>
+      <p class="hint">A plain text file: records, the progression at each distance,
+        every race, and the efforts the terrain screen rejected with the reason.
+        Readable in twenty years with no copy of this program to hand.</p>
+      <div class="row">
+        <a class="download" id="downloadRecords" href="#" download>Download records .txt</a>
+        <button class="ghost" id="previewRecords">Preview</button>
+      </div>
+      <div class="msg" id="backupMsg"></div>
+      <div id="preview" class="pre hidden" style="margin-top:14px"></div>
+    </fieldset>
+    <fieldset><legend>Where your data lives</legend>
+      <p class="hint">One SQLite file, <code>taper.db</code>, in the directory you
+        started this from. Copy it and you have copied everything — training days,
+        races, symptoms, episodes and check-ins. It is ignored by git on purpose.</p>
+    </fieldset>
+  </section>
+
+</div>
+
+<!-- ============ RAIL ============ -->
+<aside class="col rail">
+  <fieldset><legend>Where you stand</legend>
+    <div class="stat" id="railVdot">—<small id="railVdotNote"></small></div>
+    <div style="margin-top:14px">
+      <div class="kv"><span>Days logged</span><b id="railDays">0</b></div>
+      <div class="kv"><span>Distance</span><b id="railKm">0 km</b></div>
+      <div class="kv"><span>Coverage</span><b id="railCoverage">—</b></div>
+      <div class="kv"><span>Races</span><b id="railRaces">0</b></div>
+      <div class="kv"><span>Flares recorded</span><b id="railFlares">0</b></div>
+      <div class="kv"><span>Open injuries</span><b id="railOpen">0</b></div>
+    </div>
+    <div style="margin-top:12px" id="railCalibration"></div>
+  </fieldset>
+  <fieldset><legend>What to trust</legend>
+    <div id="railWarnings"></div>
+  </fieldset>
+</aside>
+</div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let STATE = null, athleteId = null, severity = 3;
+
+// -- helpers ---------------------------------------------------------------
+
+const today = () => new Date().toLocaleDateString("sv");   // local YYYY-MM-DD
+
+function parseDuration(text) {
+  const t = (text || "").trim();
+  if (!t) return null;
+  if (/^\d+(\.\d+)?$/.test(t)) return Math.round(parseFloat(t) * 60);  // bare minutes
+  const parts = t.split(":").map(Number);
+  if (parts.some(isNaN)) return null;
+  return parts.reduce((total, part) => total * 60 + part, 0);
+}
+
+function showDuration(seconds) {
+  if (!seconds) return "";
+  const s = Math.round(seconds), h = Math.floor(s / 3600),
+        m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
+
+const num = (el) => { const v = parseFloat($(el).value); return isNaN(v) ? null : v; };
+const int = (el) => { const v = parseInt($(el).value, 10); return isNaN(v) ? null : v; };
+
+function say(el, text, kind) {
+  const node = $(el);
+  node.textContent = text;
+  node.className = "msg" + (kind ? " " + kind : "");
+}
+
+async function api(path, body) {
+  const options = body
+    ? {method: "POST", headers: {"Content-Type": "application/json"},
+       body: JSON.stringify(body)}
+    : {};
+  const res = await fetch(path, options);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch (e) {}
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+function esc(text) {
+  return String(text == null ? "" : text)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// -- tabs ------------------------------------------------------------------
+
+$("tabs").addEventListener("click", (e) => {
+  const button = e.target.closest("button[data-tab]");
+  if (!button) return;
+  for (const b of $("tabs").children) b.setAttribute("aria-selected", b === button);
+  for (const panel of document.querySelectorAll("[data-panel]"))
+    panel.classList.toggle("hidden", panel.dataset.panel !== button.dataset.tab);
+});
+
+// -- severity picker -------------------------------------------------------
+
+$("sevPicker").innerHTML = Array.from({length: 11}, (_, i) =>
+  `<button type="button" data-sev="${i}" class="${i >= 4 ? "hot" : ""}">${i}</button>`).join("");
+$("sevPicker").addEventListener("click", (e) => {
+  const button = e.target.closest("button[data-sev]");
+  if (!button) return;
+  severity = Number(button.dataset.sev);
+  paintSeverity();
+});
+function paintSeverity() {
+  for (const b of $("sevPicker").children)
+    b.setAttribute("aria-pressed", Number(b.dataset.sev) === severity);
+}
+
+// -- loading ---------------------------------------------------------------
+
+async function load(id) {
+  const days = $("logWindow") ? $("logWindow").value : 60;
+  const query = new URLSearchParams({days});
+  if (id) query.set("athlete", id);
+  STATE = await api("/api/state?" + query.toString());
+
+  const has = STATE.athletes.length > 0;
+  $("noAthlete").classList.toggle("hidden", has);
+  $("app").classList.toggle("hidden", !has);
+  if (!has) return;
+
+  athleteId = STATE.athlete_id;
+  $("athlete").innerHTML = STATE.athletes.map((a) =>
+    `<option value="${a.id}" ${a.id === athleteId ? "selected" : ""}>${esc(a.name || "Unnamed")}</option>`
+  ).join("");
+  $("downloadRecords").href = `/api/export/records.txt?athlete=${athleteId}`;
+
+  renderRail(); renderLog(); renderRaces(); renderEpisodes();
+  renderLayoffs(); renderSymptoms(); renderRecords();
+  prefillToday();
+}
+
+// -- rail ------------------------------------------------------------------
+
+function renderRail() {
+  const s = STATE.summary;
+  $("railVdot").innerHTML = s.vdot
+    ? `${s.vdot}<small> VDOT</small>`
+    : `—<small> no dated races yet</small>`;
+  $("railDays").textContent = s.days_logged;
+  $("railKm").textContent = `${s.total_km} km`;
+  $("railCoverage").textContent = s.days_logged ? `${Math.round(s.coverage * 100)}%` : "—";
+  $("railRaces").textContent = s.races;
+  $("railFlares").textContent = s.flares;
+  $("railOpen").textContent = s.open_episodes;
+  $("railCalibration").innerHTML =
+    `<span class="badge ${s.calibrated ? "ok" : "warn"}">${
+      s.calibrated ? "fitted to you" : "population defaults"}</span>
+     <p class="hint" style="margin:8px 0 0">${esc(s.calibration_note)}</p>`;
+  $("railWarnings").innerHTML = s.warnings.length
+    ? s.warnings.map((w) => `<div class="flag"><i></i><div>${esc(w)}</div></div>`).join("")
+    : `<div class="empty">Nothing to flag. The history behind these numbers is solid.</div>`;
+}
+
+// -- today -----------------------------------------------------------------
+
+function prefillToday() {
+  if (!$("d_day").value) $("d_day").value = today();
+  const day = $("d_day").value;
+  const existing = (STATE.training_days || []).find((d) => d.day === day);
+  if (existing) fillDayForm(existing);
+
+  const well = (STATE.wellness || []).find((w) => w.day === day);
+  $("w_sleep").value = well?.sleep_hours ?? "";
+  $("w_quality").value = well?.sleep_quality ?? "";
+  $("w_soreness").value = well?.soreness ?? "";
+  $("w_stress").value = well?.stress ?? "";
+  $("w_motivation").value = well?.motivation ?? "";
+  $("w_rhr").value = well?.resting_hr ?? "";
+  $("w_mass").value = well?.body_mass_kg ?? "";
+
+  const mine = (STATE.symptoms || []).filter((s) => s.day === day);
+  $("todaySymptoms").innerHTML = mine.length ? `
+    <table style="margin-top:12px"><tbody>${mine.map((s) => `
+      <tr><td>${esc(s.body_part)}</td>
+          <td class="num">${s.severity}</td>
+          <td>${s.is_flare ? '<span class="badge alert">flare</span>' : ""}</td>
+          <td style="width:1%"><button class="link" data-drop-symptom="${esc(s.body_part)}"
+            title="Remove">&times;</button></td></tr>`).join("")}</tbody></table>` : "";
+  paintSeverity();
+}
+
+function fillDayForm(d) {
+  $("d_kind").value = d.kind; $("d_distance").value = d.distance_km || "";
+  $("d_duration").value = d.duration || ""; $("d_surface").value = d.surface;
+  $("d_hr").value = d.avg_hr ?? ""; $("d_rpe").value = d.rpe ?? "";
+  $("d_gain").value = d.elevation_gain_m ?? ""; $("d_loss").value = d.elevation_loss_m ?? "";
+  $("d_name").value = d.name || ""; $("d_notes").value = d.notes || "";
+}
+
+function clearDayForm() {
+  for (const id of ["d_distance", "d_duration", "d_hr", "d_rpe", "d_gain", "d_loss",
+                    "d_name", "d_notes"]) $(id).value = "";
+  $("d_kind").value = "easy";
+}
+
+$("d_day").addEventListener("change", () => { clearDayForm(); prefillToday(); });
+
+$("todaySymptoms").addEventListener("click", async (e) => {
+  const button = e.target.closest("button[data-drop-symptom]");
+  if (!button) return;
+  await api("/api/symptom/delete", {athlete_id: athleteId, day: $("d_day").value,
+                                    body_part: button.dataset.dropSymptom});
+  await load(athleteId);
+});
+
+$("saveDay").addEventListener("click", () => saveDay(false));
+$("restDay").addEventListener("click", () => saveDay(true));
+
+async function saveDay(rest) {
+  const duration = parseDuration($("d_duration").value);
+  if (!rest && $("d_duration").value.trim() && duration === null)
+    return say("dayMsg", "Could not read that time. Try 48:20 or 1:12:30.", "bad");
+  try {
+    await api("/api/training-day", {
+      athlete_id: athleteId, day: $("d_day").value,
+      distance_km: rest ? 0 : (num("d_distance") || 0),
+      duration_s: rest ? null : duration,
+      avg_hr: rest ? null : int("d_hr"), rpe: rest ? null : num("d_rpe"),
+      elevation_gain_m: rest ? null : num("d_gain"),
+      elevation_loss_m: rest ? null : num("d_loss"),
+      surface: $("d_surface").value, name: rest ? "" : $("d_name").value,
+      kind: rest ? "off" : $("d_kind").value, notes: $("d_notes").value,
+    });
+    say("dayMsg", rest ? "Rest day logged." : "Saved.", "ok");
+    await load(athleteId);
+  } catch (err) { say("dayMsg", err.message, "bad"); }
+}
+
+$("saveWellness").addEventListener("click", async () => {
+  try {
+    await api("/api/wellness", {
+      athlete_id: athleteId, day: $("d_day").value, sleep_hours: num("w_sleep"),
+      sleep_quality: int("w_quality"), soreness: int("w_soreness"),
+      stress: int("w_stress"), motivation: int("w_motivation"),
+      resting_hr: int("w_rhr"), body_mass_kg: num("w_mass"), notes: "",
+    });
+    say("wellnessMsg", "Check-in saved.", "ok");
+    await load(athleteId);
+  } catch (err) { say("wellnessMsg", err.message, "bad"); }
+});
+
+$("saveSymptom").addEventListener("click", async () => {
+  if (!$("s_part").value.trim())
+    return say("symptomMsg", "Which body part?", "bad");
+  try {
+    await api("/api/symptom", {
+      athlete_id: athleteId, day: $("d_day").value, body_part: $("s_part").value,
+      severity: severity, tissue: $("s_tissue").value,
+      affected_running: $("s_affected").checked, notes: $("s_notes").value,
+    });
+    say("symptomMsg", "Recorded.", "ok");
+    $("s_part").value = ""; $("s_notes").value = ""; $("s_affected").checked = false;
+    severity = 3;
+    await load(athleteId);
+  } catch (err) { say("symptomMsg", err.message, "bad"); }
+});
+
+// -- training log ----------------------------------------------------------
+
+$("logWindow").addEventListener("change", () => load(athleteId));
+
+function renderLog() {
+  const days = [...(STATE.training_days || [])].reverse();
+  if (!days.length)
+    return $("logTable").innerHTML = `<div class="empty">Nothing logged in this window yet.</div>`;
+  $("logTable").innerHTML = `
+    <table><thead><tr>
+      <th>Date</th><th>Kind</th><th style="text-align:right">km</th>
+      <th style="text-align:right">Time</th><th style="text-align:right">HR</th>
+      <th style="text-align:right">RPE</th><th>What</th><th>Source</th><th></th>
+    </tr></thead><tbody>${days.map((d) => `
+      <tr class="clickable" data-day="${d.day}">
+        <td>${d.day}</td>
+        <td>${d.kind}${d.sessions > 1 ? ` <span class="badge">${d.sessions}&times;</span>` : ""}</td>
+        <td class="num">${d.distance_km ? d.distance_km.toFixed(1) : "—"}</td>
+        <td class="num">${d.duration || "—"}</td>
+        <td class="num">${d.avg_hr ?? "—"}</td>
+        <td class="num">${d.rpe ?? "—"}</td>
+        <td>${esc(d.name)}</td>
+        <td><span class="badge">${esc(d.source)}</span></td>
+        <td style="width:1%"><button class="link" data-drop-day="${d.day}"
+          title="Delete">&times;</button></td>
+      </tr>`).join("")}</tbody></table>`;
+}
+
+$("logTable").addEventListener("click", async (e) => {
+  const drop = e.target.closest("button[data-drop-day]");
+  if (drop) {
+    e.stopPropagation();
+    await api("/api/training-day/delete", {athlete_id: athleteId, day: drop.dataset.dropDay});
+    return load(athleteId);
+  }
+  const row = e.target.closest("tr[data-day]");
+  if (!row) return;
+  $("d_day").value = row.dataset.day;
+  clearDayForm();
+  prefillToday();
+  $("tabs").firstElementChild.click();
+});
+
+// -- races -----------------------------------------------------------------
+
+const DISTANCES = [["1 mile", 1609.344], ["5K", 5000], ["8K", 8000], ["10K", 10000],
+  ["12K", 12000], ["15K", 15000], ["10 mile", 16093.44], ["Half marathon", 21097.5],
+  ["30K", 30000], ["Marathon", 42195], ["50K", 50000], ["50 mile", 80467.2],
+  ["100K", 100000]];
+
+function raceRow(r = {}) {
+  const options = DISTANCES.map(([label, m]) =>
+    `<option value="${m}" ${Math.abs((r.distance_m || 0) - m) < 1 ? "selected" : ""}>${label}</option>`).join("");
+  const custom = r.distance_m && !DISTANCES.some(([, m]) => Math.abs(r.distance_m - m) < 1);
+  return `<tr>
+    <td><select data-f="distance_m">${options}
+      ${custom ? `<option value="${r.distance_m}" selected>${(r.distance_m / 1000).toFixed(2)} km</option>` : ""}
+    </select></td>
+    <td><input data-f="finish_time" value="${esc(r.finish_time || "")}" placeholder="1:32:40"></td>
+    <td><input type="date" data-f="race_date" value="${esc(r.race_date || "")}"></td>
+    <td><input data-f="name" value="${esc(r.name || "")}" placeholder="Race name"></td>
+    <td><input type="number" data-f="place_overall" value="${r.place_overall ?? ""}" placeholder="—"></td>
+    <td><input type="number" data-f="field_size" value="${r.field_size ?? ""}" placeholder="—"></td>
+    <td><select data-f="surface">
+      ${["road", "trail", "track", "treadmill", "grass"].map((s) =>
+        `<option value="${s}" ${r.surface === s ? "selected" : ""}>${s}</option>`).join("")}
+    </select></td>
+    <td><input type="number" data-f="elevation_gain_m" value="${r.elevation_gain_m ?? ""}" placeholder="—"></td>
+    <td style="width:1%"><button class="link" data-drop-race title="Remove">&times;</button></td>
+  </tr>`;
+}
+
+function renderRaces() {
+  const rows = (STATE.races || []).map(raceRow).join("");
+  $("raceTable").innerHTML = `
+    <table><thead><tr>
+      <th>Distance</th><th>Time</th><th>Date</th><th>Name</th><th>Place</th>
+      <th>Field</th><th>Surface</th><th>Climb m</th><th></th>
+    </tr></thead><tbody id="raceBody">${rows}</tbody></table>
+    ${rows ? "" : `<div class="empty">No races yet. Add the ones you remember — an
+      approximate date is far better than none.</div>`}`;
+}
+
+$("addRace").addEventListener("click", () => {
+  const body = $("raceBody");
+  body.insertAdjacentHTML("beforeend", raceRow({surface: "road"}));
+});
+
+$("raceTable").addEventListener("click", (e) => {
+  if (e.target.closest("button[data-drop-race]")) e.target.closest("tr").remove();
+});
+
+$("saveRaces").addEventListener("click", async () => {
+  const races = [];
+  for (const tr of $("raceBody").querySelectorAll("tr")) {
+    const get = (f) => tr.querySelector(`[data-f="${f}"]`).value;
+    const seconds = parseDuration(get("finish_time"));
+    if (!seconds) continue;
+    races.push({
+      distance_m: parseFloat(get("distance_m")), finish_time_s: seconds,
+      race_date: get("race_date") || null, name: get("name"),
+      place_overall: parseInt(get("place_overall"), 10) || null,
+      field_size: parseInt(get("field_size"), 10) || null,
+      surface: get("surface"),
+      elevation_gain_m: parseFloat(get("elevation_gain_m")) || null,
+    });
+  }
+  try {
+    const result = await api("/api/races", {athlete_id: athleteId, races});
+    say("raceMsg", `Saved ${result.races} race${result.races === 1 ? "" : "s"}.`, "ok");
+    await load(athleteId);
+  } catch (err) { say("raceMsg", err.message, "bad"); }
+});
+
+// -- episodes --------------------------------------------------------------
+
+function episodeRow(e = {}) {
+  return `<tr>
+    <td><input data-f="body_part" value="${esc(e.body_part || "")}" placeholder="left achilles"></td>
+    <td><select data-f="tissue">${["other", "tendon", "bone", "muscle", "joint", "fascia"]
+      .map((t) => `<option value="${t}" ${e.tissue === t ? "selected" : ""}>${t}</option>`).join("")}</select></td>
+    <td><input type="date" data-f="onset_date" value="${esc(e.onset_date || "")}"></td>
+    <td><input type="date" data-f="resolved_date" value="${esc(e.resolved_date || "")}"></td>
+    <td><input type="number" data-f="peak_severity" min="0" max="10" step="0.5"
+      value="${e.peak_severity ?? ""}" placeholder="—"></td>
+    <td><input type="number" data-f="days_lost" value="${e.days_lost ?? 0}"></td>
+    <td><input data-f="notes" value="${esc(e.notes || "")}" placeholder="What set it off"></td>
+    <td style="width:1%"><button class="link" data-drop-episode title="Remove">&times;</button></td>
+  </tr>`;
+}
+
+function renderEpisodes() {
+  const rows = (STATE.episodes || []).map(episodeRow).join("");
+  $("episodeTable").innerHTML = `
+    <table><thead><tr>
+      <th>Body part</th><th>Tissue</th><th>Onset</th><th>Resolved</th><th>Peak</th>
+      <th>Days lost</th><th>Notes</th><th></th>
+    </tr></thead><tbody id="episodeBody">${rows}</tbody></table>
+    ${rows ? "" : `<div class="empty">No episodes recorded.</div>`}`;
+}
+
+$("addEpisode").addEventListener("click", () =>
+  $("episodeBody").insertAdjacentHTML("beforeend", episodeRow({onset_date: today()})));
+
+$("episodeTable").addEventListener("click", (e) => {
+  if (e.target.closest("button[data-drop-episode]")) e.target.closest("tr").remove();
+});
+
+$("saveEpisodes").addEventListener("click", async () => {
+  const episodes = [];
+  for (const tr of $("episodeBody").querySelectorAll("tr")) {
+    const get = (f) => tr.querySelector(`[data-f="${f}"]`).value;
+    if (!get("body_part").trim() || !get("onset_date")) continue;
+    episodes.push({
+      body_part: get("body_part"), tissue: get("tissue"),
+      onset_date: get("onset_date"), resolved_date: get("resolved_date") || null,
+      peak_severity: parseFloat(get("peak_severity")) || null,
+      days_lost: parseInt(get("days_lost"), 10) || 0, notes: get("notes"),
+    });
+  }
+  try {
+    const result = await api("/api/episodes", {athlete_id: athleteId, episodes});
+    say("episodeMsg", `Saved ${result.episodes} episode${result.episodes === 1 ? "" : "s"}.`, "ok");
+    await load(athleteId);
+  } catch (err) { say("episodeMsg", err.message, "bad"); }
+});
+
+function renderLayoffs() {
+  const layoffs = STATE.layoffs || [];
+  $("layoffList").innerHTML = layoffs.length ? layoffs.map((l) => `
+    <div class="flag"><i></i><div>
+      <b>${l.start} to ${l.end}</b>
+      <span class="badge ${l.ongoing ? "alert" : "warn"}">${l.confidence}${l.ongoing ? " · ongoing" : ""}</span>
+      <div class="hint" style="margin:4px 0 0">${esc(l.reason)}</div>
+      <button class="ghost" style="margin-top:6px" data-promote='${esc(JSON.stringify(l))}'>
+        This was an injury</button>
+    </div></div>`).join("")
+    : `<div class="empty">No gaps found. Either the log is short, or you have been
+       remarkably consistent.</div>`;
+}
+
+$("layoffList").addEventListener("click", (e) => {
+  const button = e.target.closest("button[data-promote]");
+  if (!button) return;
+  const layoff = JSON.parse(button.dataset.promote);
+  $("episodeBody").insertAdjacentHTML("beforeend", episodeRow({
+    onset_date: layoff.start, resolved_date: layoff.ongoing ? "" : layoff.end,
+    days_lost: layoff.days, notes: `From a ${layoff.days}-day ${layoff.kind} in the log.`,
+  }));
+  say("episodeMsg", "Added below — name the body part, then save.", "ok");
+  $("episodeBody").lastElementChild.querySelector("[data-f=body_part]").focus();
+});
+
+function renderSymptoms() {
+  const symptoms = [...(STATE.symptoms || [])].reverse();
+  $("symptomHistory").innerHTML = symptoms.length ? `
+    <table><thead><tr><th>Date</th><th>Body part</th><th style="text-align:right">Severity</th>
+      <th>Tissue</th><th></th><th>Notes</th></tr></thead>
+    <tbody>${symptoms.map((s) => `<tr>
+      <td>${s.day}</td><td>${esc(s.body_part)}</td>
+      <td class="num">${s.severity}</td><td>${esc(s.tissue)}</td>
+      <td>${s.is_flare ? '<span class="badge alert">flare</span>' : ""}</td>
+      <td>${esc(s.notes)}</td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty">Nothing recorded in this window.</div>`;
+}
+
+// -- records ---------------------------------------------------------------
+
+function renderRecords() {
+  const records = STATE.records || [];
+  $("recordTable").innerHTML = records.length ? `
+    <table><thead><tr><th>Distance</th><th style="text-align:right">Time</th>
+      <th>Set</th><th>Where</th><th style="text-align:right">VDOT</th>
+      <th>Progression</th></tr></thead>
+    <tbody>${records.map((r) => `<tr>
+      <td><b>${r.label}</b></td>
+      <td class="num">${r.time}</td>
+      <td>${r.set_on || "undated"}</td>
+      <td>${esc(r.name) || `<span class="badge">${esc(r.source)}</span>`}</td>
+      <td class="num">${r.vdot}</td>
+      <td class="chain">${r.chain.map((c) => c.time).join(" → ")}</td>
+    </tr>`).join("")}</tbody></table>`
+    : `<div class="empty">No records yet. Add races, or log a run whose whole
+       distance lands on a standard one.</div>`;
+
+  const rejected = STATE.rejected || [];
+  $("rejectedTable").innerHTML = rejected.length ? `
+    <table><thead><tr><th>Distance</th><th style="text-align:right">Time</th>
+      <th>Date</th><th>Why not</th></tr></thead>
+    <tbody>${rejected.map((e) => `<tr>
+      <td>${e.label}</td><td class="num">${e.time}</td><td>${e.day || "—"}</td>
+      <td class="hint" style="margin:0">${esc(e.reason)}</td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty">Nothing excluded.</div>`;
+}
+
+// -- backup ----------------------------------------------------------------
+
+$("previewRecords").addEventListener("click", async () => {
+  const res = await fetch(`/api/export/records.txt?athlete=${athleteId}`);
+  $("preview").textContent = await res.text();
+  $("preview").classList.remove("hidden");
+  say("backupMsg", "This is exactly what the file contains.", "ok");
+});
+
+// -- athletes --------------------------------------------------------------
+
+$("athlete").addEventListener("change", (e) => load(Number(e.target.value)));
+
+$("newAthlete").addEventListener("click", async () => {
+  const name = prompt("Name for the new runner?");
+  if (name === null) return;
+  const result = await api("/api/athlete", {name});
+  await load(result.athlete_id);
+});
+
+$("createFirst").addEventListener("click", async () => {
+  const result = await api("/api/athlete", {name: $("firstName").value});
+  await load(result.athlete_id);
+});
+
+paintSeverity();
+load();
+</script>
+</body>
+</html>

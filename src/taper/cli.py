@@ -21,6 +21,22 @@ def main(argv: list[str] | None = None) -> int:
     intake.add_argument("--no-browser", action="store_true",
                         help="do not open a browser window automatically")
 
+    log = sub.add_parser(
+        "log", help="open the training log in a browser: days, races, symptoms, records")
+    log.add_argument("--port", type=int, default=8001)
+    log.add_argument("--host", default="127.0.0.1")
+    log.add_argument("--db", default="taper.db", help="database file (default: taper.db)")
+    log.add_argument("--no-browser", action="store_true",
+                     help="do not open a browser window automatically")
+
+    export = sub.add_parser(
+        "export", help="write the record history to a text file")
+    export.add_argument("-o", "--output", default=None,
+                        help="file to write (default: a dated name in this directory)")
+    export.add_argument("--db", default="taper.db", help="database file (default: taper.db)")
+    export.add_argument("--athlete", type=int, default=None,
+                        help="athlete id (default: the most recently updated)")
+
     show = sub.add_parser("show", help="print a summary of a saved profile")
     show.add_argument("path")
 
@@ -47,6 +63,20 @@ def main(argv: list[str] | None = None) -> int:
         serve(host=args.host, port=args.port)
         return 0
 
+    if args.command == "log":
+        from taper.logapp.app import serve
+
+        url = f"http://{args.host}:{args.port}/"
+        print(f"taper log -> {url}")
+        print(f"Writing to {args.db}. Everything stays on this machine. Ctrl-C to stop.")
+        if not args.no_browser:
+            threading.Timer(0.7, webbrowser.open, args=(url,)).start()
+        serve(host=args.host, port=args.port, db_path=args.db)
+        return 0
+
+    if args.command == "export":
+        return _export(args.output, args.db, args.athlete)
+
     if args.command == "show":
         return _show(args.path)
 
@@ -54,6 +84,32 @@ def main(argv: list[str] | None = None) -> int:
         return _import_strava(args.path, args.db, args.athlete, args.dry_run)
 
     return 1
+
+
+def _export(output: str | None, db_path: str, athlete_id: int | None) -> int:
+    from pathlib import Path
+
+    from taper.db import Database
+    from taper.export import records_report, suggested_filename
+
+    if not Path(db_path).exists():
+        print(f"No database at {db_path}. Run 'taper log' or 'taper import-strava' first.")
+        return 1
+
+    db = Database(db_path)
+    try:
+        target = athlete_id or db.default_athlete_id()
+        if target is None:
+            print("No athlete in the database yet.")
+            return 1
+        profile = db.load_profile(target)
+    finally:
+        db.close()
+
+    path = Path(output) if output else Path(suggested_filename(profile))
+    path.write_text(records_report(profile))
+    print(f"Wrote {path} ({path.stat().st_size} bytes).")
+    return 0
 
 
 def _import_strava(path: str, db_path: str, athlete_id: int | None, dry_run: bool) -> int:
