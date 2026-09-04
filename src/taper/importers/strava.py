@@ -321,6 +321,7 @@ def _merge_into_days(activities: list[Activity], result: StravaImport) -> list[T
             elevation_loss_m=sum(losses) if losses else None,
             surface=chosen[0].surface,
             kind="easy" if runs else "cross",
+            sessions=len(entries),
             source="strava",
             name=" / ".join(names[:3]),
         ))

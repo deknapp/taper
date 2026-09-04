@@ -95,6 +95,7 @@ class TrainingDay:
     surface: Surface = Surface.ROAD
     name: str = ""
     kind: str = "easy"                    # easy | long | workout | race | cross | off
+    sessions: int = 1                     # activities merged into this row
     source: str = "manual"                # 'manual', 'estimated', or an import name
     notes: str = ""
 

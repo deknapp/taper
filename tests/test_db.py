@@ -296,12 +296,13 @@ def test_setting_the_same_key_twice_overwrites(db):
 
 # -- migrations ------------------------------------------------------------
 
-def _downgrade_to_v1(path) -> None:
-    """Strip a file back to the v1 training_day shape, to test the upgrade."""
+def _downgrade(path, version: int) -> None:
+    """Strip a file back to an older training_day shape, to test the upgrade."""
+    dropped = {2: ["sessions"], 1: ["sessions", "elevation_loss_m", "name"]}[version]
     conn = sqlite3.connect(path)
-    conn.execute("ALTER TABLE training_day DROP COLUMN elevation_loss_m")
-    conn.execute("ALTER TABLE training_day DROP COLUMN name")
-    conn.execute("PRAGMA user_version = 1")
+    for column in dropped:
+        conn.execute(f"ALTER TABLE training_day DROP COLUMN {column}")
+    conn.execute(f"PRAGMA user_version = {version}")
     conn.commit()
     conn.close()
 
@@ -312,13 +313,14 @@ def test_a_v1_file_gains_the_missing_columns_on_open(tmp_path):
         athlete_id = database.save_profile(AthleteProfile(name="Old"))
         database.upsert_training_days(
             athlete_id, [TrainingDay(day=date(2024, 8, 1), distance_km=10.0)])
-    _downgrade_to_v1(path)
+    _downgrade(path, 1)
 
     with Database(path) as upgraded:
-        assert upgraded.conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert upgraded.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         day = upgraded.training_days(athlete_id)[0]
         assert day.elevation_loss_m is None
         assert day.name == ""
+        assert day.sessions == 1
 
 
 def test_upgrading_from_v1_keeps_the_training_already_logged(tmp_path):
@@ -328,7 +330,7 @@ def test_upgrading_from_v1_keeps_the_training_already_logged(tmp_path):
         database.upsert_training_days(
             athlete_id, [TrainingDay(day=date(2024, 8, n), distance_km=float(n))
                          for n in range(1, 8)])
-    _downgrade_to_v1(path)
+    _downgrade(path, 1)
 
     with Database(path) as upgraded:
         days = upgraded.training_days(athlete_id)
@@ -341,7 +343,7 @@ def test_an_upgraded_file_can_then_store_elevation_loss(tmp_path):
     path = tmp_path / "old.db"
     with Database(path) as database:
         athlete_id = database.save_profile(AthleteProfile())
-    _downgrade_to_v1(path)
+    _downgrade(path, 1)
 
     with Database(path) as upgraded:
         upgraded.upsert_training_days(athlete_id, [training_day()])
@@ -355,3 +357,30 @@ def test_opening_an_already_current_file_is_a_no_op(tmp_path):
         database.upsert_training_days(athlete_id, [training_day()])
     with Database(path) as reopened:
         assert reopened.training_days(athlete_id) == [training_day()]
+
+
+def test_a_v2_file_gains_the_session_count_on_open(tmp_path):
+    path = tmp_path / "v2.db"
+    with Database(path) as database:
+        athlete_id = database.save_profile(AthleteProfile())
+        database.upsert_training_days(
+            athlete_id, [TrainingDay(day=date(2024, 8, 1), distance_km=10.0,
+                                     duration_s=2400.0)])
+    _downgrade(path, 2)
+
+    with Database(path) as upgraded:
+        assert upgraded.conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        day = upgraded.training_days(athlete_id)[0]
+        # Days logged before the column existed are assumed to be single runs,
+        # which is what a hand-entered day almost always is.
+        assert day.sessions == 1
+        assert day.distance_km == pytest.approx(10.0)
+
+
+def test_the_session_count_survives_a_round_trip(tmp_path):
+    with Database(tmp_path / "s.db") as database:
+        athlete_id = database.save_profile(AthleteProfile())
+        double = TrainingDay(day=date(2024, 8, 1), distance_km=10.0,
+                             duration_s=2400.0, sessions=2)
+        database.upsert_training_days(athlete_id, [double])
+        assert database.training_days(athlete_id)[0].sessions == 2

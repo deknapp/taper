@@ -24,7 +24,7 @@ from taper.athlete import (
     Sex, Surface, Tissue, TrainingBackground, TrainingDay,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_DB_PATH = Path("taper.db")
 
 # Sources that represent things that really happened, as opposed to anything the
@@ -103,6 +103,7 @@ CREATE TABLE training_day (
     surface         TEXT    NOT NULL DEFAULT 'road',
     name            TEXT    NOT NULL DEFAULT '',
     kind            TEXT    NOT NULL DEFAULT 'easy',
+    sessions        INTEGER NOT NULL DEFAULT 1,
     source          TEXT    NOT NULL DEFAULT 'manual',
     notes           TEXT    NOT NULL DEFAULT '',
     UNIQUE(athlete_id, day)
@@ -200,6 +201,15 @@ class Database:
                 self.conn.execute(
                     "ALTER TABLE training_day ADD COLUMN name TEXT NOT NULL DEFAULT ''")
                 self.conn.execute("PRAGMA user_version = 2")
+
+        # v2 -> v3. How many activities were merged into a day. Without it a
+        # day cannot say whether its time describes one run or several added up.
+        if version < 3:
+            with self.conn:
+                self.conn.execute(
+                    "ALTER TABLE training_day ADD COLUMN sessions INTEGER NOT NULL "
+                    "DEFAULT 1")
+                self.conn.execute("PRAGMA user_version = 3")
 
     def close(self) -> None:
         self.conn.close()
@@ -377,7 +387,8 @@ class Database:
                 duration_s=r["duration_s"], avg_hr=r["avg_hr"], rpe=r["rpe"],
                 elevation_gain_m=r["elevation_gain_m"],
                 elevation_loss_m=r["elevation_loss_m"], surface=Surface(r["surface"]),
-                name=r["name"], kind=r["kind"], source=r["source"], notes=r["notes"])
+                name=r["name"], kind=r["kind"], sessions=r["sessions"],
+                source=r["source"], notes=r["notes"])
             for r in self.conn.execute(sql, args)]
 
     def upsert_training_days(self, athlete_id: int, days: Iterable[TrainingDay]) -> int:
@@ -389,7 +400,7 @@ class Database:
         rows = [
             (athlete_id, _iso(d.day), d.distance_km, d.duration_s, d.avg_hr, d.rpe,
              d.elevation_gain_m, d.elevation_loss_m, d.surface.value, d.name, d.kind,
-             d.source, d.notes)
+             d.sessions, d.source, d.notes)
             for d in days]
         if not rows:
             return 0
@@ -397,14 +408,14 @@ class Database:
             conn.executemany(
                 "INSERT INTO training_day (athlete_id, day, distance_km, duration_s, "
                 "avg_hr, rpe, elevation_gain_m, elevation_loss_m, surface, name, kind, "
-                "source, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "sessions, source, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(athlete_id, day) DO UPDATE SET "
                 "distance_km=excluded.distance_km, duration_s=excluded.duration_s, "
                 "avg_hr=excluded.avg_hr, rpe=excluded.rpe, "
                 "elevation_gain_m=excluded.elevation_gain_m, "
                 "elevation_loss_m=excluded.elevation_loss_m, surface=excluded.surface, "
-                "name=excluded.name, kind=excluded.kind, source=excluded.source, "
-                "notes=excluded.notes",
+                "name=excluded.name, kind=excluded.kind, sessions=excluded.sessions, "
+                "source=excluded.source, notes=excluded.notes",
                 rows)
         return len(rows)
 
