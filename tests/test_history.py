@@ -321,3 +321,107 @@ def test_seeded_days_never_count_as_real_history():
     report = summarise(p, today=TODAY)
     assert report.training.real_days == 0
     assert any("not evidence" in w for w in report.warnings)
+
+
+# -- days with real work but nothing to judge it by ------------------------
+
+def no_race_profile(days):
+    p = profile(training_days=days)
+    p.races = []
+    return p
+
+
+def test_a_real_day_without_a_fitness_reference_is_unjudged_not_estimated():
+    # Real distance, real time, no monitor, no RPE, and no race to imply a VDOT.
+    # This is what a Strava import looks like before any race is entered, and
+    # calling it 'distance' would claim the duration was made up.
+    days = [TrainingDay(day=TODAY - timedelta(days=i), distance_km=10,
+                        duration_s=3000) for i in range(60)]
+    coverage = training_coverage(days, no_race_profile(days))
+    assert coverage.methods == {"assumed": 60}
+
+
+def test_the_unjudged_days_are_told_what_would_fix_them():
+    days = [TrainingDay(day=TODAY - timedelta(days=i), distance_km=10,
+                        duration_s=3000) for i in range(60)]
+    report = summarise(no_race_profile(days), today=TODAY)
+    warning = next(w for w in report.warnings if "flat assumption" in w)
+    assert "single dated race result" in warning
+
+
+def test_unjudged_days_are_never_described_as_having_a_made_up_duration():
+    days = [TrainingDay(day=TODAY - timedelta(days=i), distance_km=10,
+                        duration_s=3000) for i in range(60)]
+    report = summarise(no_race_profile(days), today=TODAY)
+    assert not any("duration was assumed" in w for w in report.warnings)
+
+
+def test_a_race_result_promotes_unjudged_days_to_pace_derived():
+    days = [TrainingDay(day=TODAY - timedelta(days=i), distance_km=10,
+                        duration_s=3000) for i in range(60)]
+    assert training_coverage(days, no_race_profile(days)).methods == {"assumed": 60}
+    assert training_coverage(days, profile(training_days=days)).methods == {"pace": 60}
+
+
+# -- heart rate that is going to waste ------------------------------------
+
+def test_heart_rate_data_is_counted_even_when_it_cannot_be_used():
+    days = [TrainingDay(day=TODAY - timedelta(days=i), distance_km=10,
+                        duration_s=3000, avg_hr=150) for i in range(60)]
+    p = profile(training_days=days)
+    p.physiology = Physiology()
+    assert training_coverage(days, p).days_with_hr == 60
+
+
+def test_unusable_heart_rate_is_flagged_with_what_unlocks_it():
+    days = [TrainingDay(day=TODAY - timedelta(days=i), distance_km=10,
+                        duration_s=3000, avg_hr=150) for i in range(60)]
+    p = profile(training_days=days)
+    p.physiology = Physiology()
+    report = summarise(p, today=TODAY)
+    warning = next(w for w in report.warnings if "going" in w and "unused" in w)
+    assert "resting and maximum heart rate" in warning
+
+
+def test_heart_rate_is_not_flagged_once_the_zones_are_known():
+    days = [TrainingDay(day=TODAY - timedelta(days=i), distance_km=10,
+                        duration_s=3000, avg_hr=150) for i in range(60)]
+    report = summarise(profile(training_days=days), today=TODAY)
+    assert not any("unused" in w for w in report.warnings)
+    assert training_coverage(days, profile()).methods == {"hr": 60}
+
+
+def test_a_log_with_no_heart_rate_at_all_is_not_nagged_about_zones():
+    days = [TrainingDay(day=TODAY - timedelta(days=i), distance_km=10,
+                        duration_s=3000) for i in range(60)]
+    p = profile(training_days=days)
+    p.physiology = Physiology()
+    report = summarise(p, today=TODAY)
+    assert not any("unused" in w for w in report.warnings)
+
+
+def test_a_day_carrying_an_unusable_heart_rate_is_not_called_dataless():
+    # The heart rate is there; the zones to read it are not. Saying the day has
+    # no heart rate would send the runner to fix the wrong thing.
+    days = [TrainingDay(day=TODAY - timedelta(days=i), distance_km=10,
+                        duration_s=3000, avg_hr=150) for i in range(60)]
+    p = profile(training_days=days)
+    p.physiology = Physiology()
+    report = summarise(p, today=TODAY)
+    assert not any("neither a heart rate" in w for w in report.warnings)
+
+
+def test_rest_days_do_not_count_as_days_missing_intensity_data():
+    days = [TrainingDay(day=TODAY - timedelta(days=i), kind="off") for i in range(50)]
+    days += [TrainingDay(day=TODAY - timedelta(days=50 + i), distance_km=10,
+                         duration_s=3000, rpe=5) for i in range(10)]
+    report = summarise(profile(training_days=days), today=TODAY)
+    assert not any("neither a heart rate" in w for w in report.warnings)
+
+
+def test_a_log_genuinely_without_intensity_data_is_still_flagged():
+    days = [TrainingDay(day=TODAY - timedelta(days=i), distance_km=10,
+                        duration_s=3000) for i in range(60)]
+    report = summarise(profile(training_days=days), today=TODAY)
+    warning = next(w for w in report.warnings if "neither a heart rate" in w)
+    assert "60 of 60 days you trained" in warning

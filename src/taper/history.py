@@ -19,7 +19,7 @@ from taper.load import day_load
 # How the load for a day was arrived at, worst to best. Shown in the settings
 # view so a runner can see which stretches of their history are solid.
 METHOD_QUALITY = {"hr": "measured", "rpe": "reported", "pace": "derived",
-                  "distance": "estimated", "rest": "rest"}
+                  "distance": "estimated", "assumed": "unjudged", "rest": "rest"}
 
 
 @dataclass
@@ -32,6 +32,7 @@ class TrainingCoverage:
     rest_days: int = 0
     methods: dict[str, int] = field(default_factory=dict)
     sources: dict[str, int] = field(default_factory=dict)
+    days_with_hr: int = 0
 
     @property
     def real_days(self) -> int:
@@ -94,6 +95,7 @@ def training_coverage(days: list[TrainingDay], profile: AthleteProfile) -> Train
         rest_days=sum(1 for d in days if d.is_rest),
         methods=dict(methods),
         sources=dict(Counter(d.source for d in days)),
+        days_with_hr=sum(1 for d in days if d.avg_hr),
     )
 
 
@@ -173,21 +175,44 @@ def summarise(profile: AthleteProfile, today: date | None = None) -> RealHistory
                 f"Your training log stops {stale} days ago. Fitness and fatigue are "
                 f"both decayed forward from there, which gets less trustworthy the "
                 f"longer the gap.")
-        # Both 'pace' and 'distance' days lack a heart rate and an RPE; they
-        # differ only in whether the duration was real or assumed. Counting the
-        # 'distance' tier alone let a whole Strava import from someone without a
-        # monitor pass without comment, while the importer was warning about
-        # exactly that.
-        inferred = coverage.methods.get("pace", 0) + coverage.methods.get("distance", 0)
-        assumed = coverage.methods.get("distance", 0)
-        if inferred > coverage.days_logged * 0.5:
-            detail = (f" On {assumed} of them the duration was assumed too, leaving "
-                      f"distance as the only real measurement.") if assumed else ""
+        # Three tiers of day lack both a heart rate and an RPE, and they differ
+        # in what else is missing: 'pace' has distance and time and a fitness
+        # reference, 'assumed' has distance and time but no reference to judge
+        # them against, 'distance' does not even have a real duration.
+        bare = coverage.methods.get("distance", 0)
+        unjudged = coverage.methods.get("assumed", 0)
+
+        # Counted from the days themselves, not from the load method. A day can
+        # carry a heart rate the model cannot yet use, and saying such a day has
+        # no heart rate is simply false -- the fix for it is the zones warning
+        # below, not an effort rating.
+        trained = [d for d in profile.training_days if not d.is_rest]
+        without_intensity = sum(1 for d in trained if not d.avg_hr and not d.rpe)
+        if trained and without_intensity > len(trained) * 0.5:
+            detail = (f" On {bare} of them the duration was assumed too, leaving "
+                      f"distance as the only real measurement.") if bare else ""
             warnings.append(
-                f"{inferred} of {coverage.days_logged} logged days have neither heart "
-                f"rate nor a perceived-effort rating, so their load is inferred from "
-                f"pace rather than measured.{detail} Adding RPE is the cheapest way to "
-                f"improve this.")
+                f"{without_intensity} of {len(trained)} days you trained record "
+                f"neither a heart rate nor a perceived-effort rating, so their load is "
+                f"inferred rather than measured.{detail} Adding RPE is the cheapest way "
+                f"to improve this.")
+
+        # The most actionable gap of all, and invisible until now: real training
+        # with real times, held back by two numbers and one race result.
+        if unjudged > coverage.days_logged * 0.25:
+            warnings.append(
+                f"{unjudged} logged days have a real distance and a real time, but with "
+                f"no dated race result there is no fitness estimate to judge that pace "
+                f"against, so their load falls back to a flat assumption. A single dated "
+                f"race result turns all {unjudged} into a pace-derived load.")
+
+        if coverage.days_with_hr and not (profile.physiology.resting_hr
+                                          and profile.physiology.max_hr):
+            warnings.append(
+                f"{coverage.days_with_hr} logged days carry a heart rate that is going "
+                f"unused: the load model needs your resting and maximum heart rate "
+                f"before it can read them. Filling in both promotes those days from "
+                f"estimated to measured -- the single biggest gain available here.")
 
     if len(profile.races) > len(dated):
         warnings.append(

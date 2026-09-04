@@ -99,7 +99,7 @@ def trimp_pace(distance_km: float, duration_min: float, vdot: float,
 @dataclass
 class DayLoad:
     value: float
-    method: str  # 'hr' | 'rpe' | 'pace' | 'distance' | 'rest'
+    method: str  # 'hr' | 'rpe' | 'pace' | 'distance' | 'assumed' | 'rest'
 
 
 # Typical easy-running pace assumptions, used only to estimate a duration when
@@ -141,5 +141,8 @@ def day_load(day: TrainingDay, *, vdot: float | None = None,
         return DayLoad(
             trimp_pace(day.distance_km, duration_min, vdot, gradient_factor), "distance")
 
-    # Nothing but a duration: treat it as steady easy running.
-    return DayLoad(session_rpe(duration_min, 4.0), "distance")
+    # A real day's work, but nothing to judge its intensity by: no monitor, no
+    # effort rating, and no fitness estimate to compare the pace against. Treated
+    # as steady easy running, and labelled 'assumed' rather than 'distance' so the
+    # provenance report does not report the duration as made up when it is real.
+    return DayLoad(session_rpe(duration_min, 4.0), "assumed")
